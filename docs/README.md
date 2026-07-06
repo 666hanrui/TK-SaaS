@@ -6,6 +6,7 @@
 
 - [TikTok Shop 店铺运营自动化调研资料](./research/tiktok-shop-automation-research.md)
 - [TikTok Shop / 惠程荣达 API 可行性客观分析](./research/api-feasibility-analysis.md)
+- [TK-SaaS 应用层实际执行计划](./specs/application-layer-execution-plan.md)
 
 ## 建议下一批文档
 
@@ -30,8 +31,11 @@ docs/
 
 ## 当前优先级
 
-1. 订单超时雷达
-2. 售后工单池
+1. 应用层 MVP 骨架
+2. 数据导入中心
 3. 库存核对与备货表
-4. 评价处理看板
-5. 达人线索库
+4. 订单超时雷达
+5. 售后工单池
+6. 评价处理看板
+7. 话术模板库
+8. 达人线索库
