@@ -8,7 +8,6 @@
 - [TikTok Shop / 惠程荣达 API 可行性客观分析](./research/api-feasibility-analysis.md)
 - [可复用仓库重新分析：哪些能用、怎么用](./research/reusable-repo-analysis.md)
 - [TK-SaaS 应用层实际执行计划](./specs/application-layer-execution-plan.md)
-- [达人筛选与联系：技术实现方案](./specs/creator-discovery-outreach.md)
 
 ## 建议下一批文档
 
@@ -40,5 +39,5 @@ docs/
 5. 售后工单池
 6. 评价处理看板
 7. 话术模板库
-8. 达人线索库
-9. n8n / 工作流层 POC
+8. n8n / 工作流层 POC
+9. 达人线索库
