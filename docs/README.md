@@ -5,6 +5,7 @@
 ## 已有文档
 
 - [TikTok Shop 店铺运营自动化调研资料](./research/tiktok-shop-automation-research.md)
+- [TikTok Shop / 惠程荣达 API 可行性客观分析](./research/api-feasibility-analysis.md)
 
 ## 建议下一批文档
 
