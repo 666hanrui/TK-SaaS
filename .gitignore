@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.npm-cache/
+.playwright-cli/
+output/
+.DS_Store
+.env
+*.local
+

@@ -1,0 +1,187 @@
+{
+  "name": "订单超时监控 - Order Timeout Monitor",
+  "nodes": [
+    {
+      "id": "7fabe71e-543c-4005-8f4e-3b5a834a746d",
+      "name": "每1小时触发",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "d9c482b2-13fa-4218-8fdb-237f54a869da",
+      "name": "获取待处理订单",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        250,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:8000/api/orders?status=PAID,READY_TO_SHIP",
+        "options": {},
+        "sendQuery": true,
+        "sendBody": false,
+        "sendHeaders": true
+      }
+    },
+    {
+      "id": "4408fb5b-7d0b-4b03-90b5-d59faa76d76d",
+      "name": "计算揽收风险",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        300
+      ],
+      "parameters": {
+        "language": "python",
+        "code": "# 输入: items 包含订单列表\n# 每个订单有: paid_at, order_status, pickup_deadline\n\nimport datetime\n\nnow = datetime.datetime.now(datetime.timezone.utc)\n\nrisk_orders = []\nfor order in items:\n    deadline_str = order.get('pickup_deadline')\n    if not deadline_str:\n        continue\n    try:\n        deadline = datetime.datetime.fromisoformat(deadline_str.replace('Z', '+00:00'))\n    except:\n        continue\n    \n    remaining_hours = (deadline - now).total_seconds() / 3600\n    \n    if remaining_hours < 0:\n        risk = 'overdue'\n    elif remaining_hours <= 1:\n        risk = 'urgent'\n    elif remaining_hours <= 4:\n        risk = 'warning'\n    elif remaining_hours <= 8:\n        risk = 'normal'\n    else:\n        continue  # 安全区间，跳过\n    \n    risk_orders.append({\n        'order_id': order.get('platform_order_id'),\n        'deadline': deadline_str,\n        'remaining_hours': round(remaining_hours, 1),\n        'risk_level': risk,\n        'status': order.get('order_status'),\n    })\n\n# 按风险排序\nrisk_orders.sort(key=lambda x: x['remaining_hours'])\n\nreturn risk_orders"
+      }
+    },
+    {
+      "id": "634e75ab-c3a5-4d7f-83e4-d84128a0cb10",
+      "name": "更新任务到 TK-SaaS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        750,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/tasks/sync",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "source",
+              "value": "n8n-order-monitor"
+            },
+            {
+              "name": "tasks",
+              "value": "={{ $json }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "bb8a6695-8811-4b69-8980-52a867f36030",
+      "name": "有风险订单？",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        500,
+        500
+      ],
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $items(\"计算揽收风险\").length }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "477b1245-e4df-410f-8f82-02e1748bc991",
+      "name": "紧急风险通知",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        750,
+        600
+      ],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "每1小时触发": {
+      "main": [
+        [
+          {
+            "node": "获取待处理订单",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取待处理订单": {
+      "main": [
+        [
+          {
+            "node": "计算揽收风险",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "计算揽收风险": {
+      "main": [
+        [
+          {
+            "node": "更新任务到 TK-SaaS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "有风险订单？",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "更新任务到 TK-SaaS": {
+      "main": [
+        [
+          {
+            "node": "有风险订单？",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "有风险订单？": {
+      "main": [
+        [
+          {
+            "node": "紧急风险通知",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {},
+  "staticData": null,
+  "tags": [],
+  "id": "c54ffbd8-22f0-452a-9a29-9de0f9ff029f",
+  "versionId": "6f3a51c5-b570-4139-9c1b-44814e88970d"
+}

@@ -1,0 +1,124 @@
+{
+  "name": "售后截止跟踪 - After-sales Deadline Tracker",
+  "nodes": [
+    {
+      "id": "545be02e-0424-4368-bf40-e44c8884ddf2",
+      "name": "每4小时触发",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 4
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "f9a83351-c93d-4134-9648-c903e2825193",
+      "name": "获取售后工单",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        250,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:8000/api/aftersales?status=open,processing",
+        "options": {},
+        "sendBody": false,
+        "sendHeaders": true
+      }
+    },
+    {
+      "id": "4f40afac-18bd-401e-a04b-52babc325c13",
+      "name": "检查截止时间",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        300
+      ],
+      "parameters": {
+        "language": "python",
+        "code": "import datetime\n\nnow = datetime.datetime.now(datetime.timezone.utc)\n\nalerts = []\nfor case in items:\n    case_id = case.get('id')\n    case_type = case.get('after_sale_type')\n    status = case.get('after_sale_status')\n    \n    # 争议证据 24h 倒计时\n    evidence_deadline = case.get('evidence_deadline')\n    if evidence_deadline:\n        try:\n            deadline = datetime.datetime.fromisoformat(evidence_deadline.replace('Z', '+00:00'))\n            remaining = (deadline - now).total_seconds() / 3600\n            if remaining < 0:\n                alerts.append({\n                    'case_id': case_id,\n                    'type': 'evidence_overdue',\n                    'deadline': evidence_deadline,\n                    'remaining_hours': round(remaining, 1),\n                    'message': '证据提交已超时'\n                })\n            elif remaining <= 24:\n                alerts.append({\n                    'case_id': case_id,\n                    'type': 'evidence_urgent',\n                    'deadline': evidence_deadline,\n                    'remaining_hours': round(remaining, 1),\n                    'message': f'证据提交截止剩余 {round(remaining)}h'\n                })\n        except:\n            pass\n    \n    # 申诉窗口 21 天\n    appeal_deadline = case.get('appeal_deadline')\n    if appeal_deadline:\n        try:\n            deadline = datetime.datetime.fromisoformat(appeal_deadline.replace('Z', '+00:00'))\n            remaining = (deadline - now).total_seconds() / 3600 / 24\n            if remaining < 0:\n                alerts.append({\n                    'case_id': case_id,\n                    'type': 'appeal_overdue',\n                    'deadline': appeal_deadline,\n                    'remaining_days': round(remaining, 1),\n                    'message': '申诉窗口已关闭'\n                })\n            elif remaining <= 7:\n                alerts.append({\n                    'case_id': case_id,\n                    'type': 'appeal_warning',\n                    'deadline': appeal_deadline,\n                    'remaining_days': round(remaining, 1),\n                    'message': f'申诉窗口剩余 {round(remaining)} 天'\n                })\n        except:\n            pass\n    \n    # 初始售后 4 个工作日响应\n    response_deadline = case.get('response_deadline')\n    if response_deadline and status in ['open', 'pending']:\n        try:\n            deadline = datetime.datetime.fromisoformat(response_deadline.replace('Z', '+00:00'))\n            remaining = (deadline - now).total_seconds() / 3600\n            if remaining <= 24:\n                alerts.append({\n                    'case_id': case_id,\n                    'type': 'response_urgent',\n                    'deadline': response_deadline,\n                    'remaining_hours': round(remaining, 1),\n                    'message': f'售后响应剩余 {round(remaining)}h'\n                })\n        except:\n            pass\n\nalerts.sort(key=lambda x: x.get('remaining_hours', 999))\nreturn alerts"
+      }
+    },
+    {
+      "id": "2ab9eb14-733b-4561-b37c-5edb5907e6c0",
+      "name": "同步告警到 TK-SaaS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        750,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/tasks/sync",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "source",
+              "value": "n8n-aftersales-monitor"
+            },
+            {
+              "name": "tasks",
+              "value": "={{ $json }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "每4小时触发": {
+      "main": [
+        [
+          {
+            "node": "获取售后工单",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取售后工单": {
+      "main": [
+        [
+          {
+            "node": "检查截止时间",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "检查截止时间": {
+      "main": [
+        [
+          {
+            "node": "同步告警到 TK-SaaS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {},
+  "staticData": null,
+  "tags": [],
+  "id": "b4996de7-fde0-4334-bc0b-7e3a8ae19f9c",
+  "versionId": "2480995a-5f78-46e1-a9ae-50ad6c4c4ff4"
+}

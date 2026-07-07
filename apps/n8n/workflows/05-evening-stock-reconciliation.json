@@ -1,0 +1,194 @@
+{
+  "name": "下班库存复核 - Evening Stock Reconciliation",
+  "nodes": [
+    {
+      "id": "f104a3ed-8a50-4347-9047-d12816f31df8",
+      "name": "18:30 定时触发",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "hour": [
+            {
+              "field": "hour",
+              "hoursInterval": 24
+            }
+          ],
+          "minute": 30
+        }
+      }
+    },
+    {
+      "id": "a3e753d4-e52d-4cf3-a82e-8f0820369589",
+      "name": "执行库存复核",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        250,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/inventory/reconcile",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "check_type",
+              "value": "evening"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "42bbe80f-98dc-40ce-9eda-43aa1a4ff937",
+      "name": "计算备货建议",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        300
+      ],
+      "parameters": {
+        "language": "python",
+        "code": "# 计算建议备货量\n# 公式: max(0, 安全库存 - 当前可售库存 - 在途数量)\n\nsuggestions = []\nfor item in items:\n    sku = item.get('sku')\n    hcrd_stock = item.get('hcrd_stock', 0) or 0\n    tiktok_stock = item.get('tiktok_stock', 0) or 0\n    in_transit = item.get('in_transit_stock', 0) or 0\n    safety_stock = item.get('safety_stock', 0) or 0\n    \n    # 以惠程荣达为准\n    effective_stock = hcrd_stock + in_transit\n    suggested = max(0, safety_stock - effective_stock)\n    \n    risk = 'none'\n    if effective_stock < safety_stock:\n        risk = 'low_stock'\n        if effective_stock == 0:\n            risk = 'out_of_stock'\n    \n    if risk != 'none' or suggested > 0:\n        suggestions.append({\n            'sku': sku,\n            'hcrd_stock': hcrd_stock,\n            'tiktok_stock': tiktok_stock,\n            'in_transit': in_transit,\n            'safety_stock': safety_stock,\n            'effective_stock': effective_stock,\n            'suggested_restock': suggested,\n            'risk': risk,\n        })\n\nreturn suggestions"
+      }
+    },
+    {
+      "id": "afe6d157-c4b4-43c7-9e18-36ab108cb94e",
+      "name": "同步备货建议到 TK-SaaS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        750,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/inventory/restock-sheet",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "check_type",
+              "value": "evening"
+            },
+            {
+              "name": "suggestions",
+              "value": "={{ $json }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "4e587c71-de66-43b2-ab2d-4addfe6bb938",
+      "name": "需要备货？",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        750,
+        500
+      ],
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $items(\"计算备货建议\").length }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "1bfc2dab-9c47-4685-9c34-3718d19ae333",
+      "name": "备货提醒（预留）",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1000,
+        500
+      ],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "18:30 定时触发": {
+      "main": [
+        [
+          {
+            "node": "执行库存复核",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "执行库存复核": {
+      "main": [
+        [
+          {
+            "node": "计算备货建议",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "计算备货建议": {
+      "main": [
+        [
+          {
+            "node": "同步备货建议到 TK-SaaS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "需要备货？",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "同步备货建议到 TK-SaaS": {
+      "main": [
+        [
+          {
+            "node": "需要备货？",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "需要备货？": {
+      "main": [
+        [
+          {
+            "node": "备货提醒（预留）",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {},
+  "staticData": null,
+  "tags": [],
+  "id": "c06212d0-364a-4eee-9b38-aed032e963cb",
+  "versionId": "dd85017a-ad1d-42d9-b480-d9e553f4328d"
+}

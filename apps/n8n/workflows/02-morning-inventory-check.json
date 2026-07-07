@@ -1,0 +1,240 @@
+{
+  "name": "上班库存核对 - Morning Inventory Check",
+  "nodes": [
+    {
+      "id": "225791c0-0f10-43d1-9036-2efeca663171",
+      "name": "09:00 定时触发",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "hour": [
+            {
+              "field": "hour",
+              "hoursInterval": 24
+            }
+          ],
+          "minute": 0
+        }
+      }
+    },
+    {
+      "id": "b955f836-581f-4afa-b62a-056c331f4806",
+      "name": "拉取惠程荣达库存",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        250,
+        200
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:8000/api/inventory/hcrd",
+        "options": {},
+        "sendBody": false,
+        "sendHeaders": true
+      }
+    },
+    {
+      "id": "cead066a-61af-4be6-b6e1-5ac24a204b71",
+      "name": "拉取TikTok库存",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        250,
+        400
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:8000/api/inventory/tiktok",
+        "options": {},
+        "sendBody": false,
+        "sendHeaders": true
+      }
+    },
+    {
+      "id": "f8798577-753a-46d1-92dc-6fbfbc529d2a",
+      "name": "合并库存数据",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        500,
+        300
+      ],
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition"
+      }
+    },
+    {
+      "id": "1ffb6ddd-1d18-42b3-ad2a-1766c676075f",
+      "name": "对比库存差异",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        300
+      ],
+      "parameters": {
+        "language": "python",
+        "code": "# 对比惠程荣达库存 与 TikTok 库存\n# 输入格式: { \"hcrd\": [...], \"tiktok\": [...] }\n\nimport json\n\nhcrd_items = items[0] if items else []\ntiktok_items = items[1] if len(items) > 1 else []\n\n# 按 SKU 建立索引\nhcrd_map = {i.get('sku'): i for i in hcrd_items}\ntiktok_map = {i.get('sku'): i for i in tiktok_items}\n\nall_skus = set(list(hcrd_map.keys()) + list(tiktok_map.keys()))\n\ndiffs = []\nfor sku in sorted(all_skus):\n    hcrd_stock = hcrd_map.get(sku, {}).get('stock', 0) or 0\n    tiktok_stock = tiktok_map.get(sku, {}).get('stock', 0) or 0\n    \n    if hcrd_stock != tiktok_stock:\n        diffs.append({\n            'sku': sku,\n            'hcrd_stock': hcrd_stock,\n            'tiktok_stock': tiktok_stock,\n            'diff': hcrd_stock - tiktok_stock,\n            'risk': 'oversold' if tiktok_stock > hcrd_stock else 'stock_diff',\n        })\n\nreturn diffs"
+      }
+    },
+    {
+      "id": "c8765a27-972e-4787-bfe8-53b9e1880117",
+      "name": "同步差异到 TK-SaaS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1000,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/inventory/reconcile",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "check_type",
+              "value": "morning"
+            },
+            {
+              "name": "differences",
+              "value": "={{ $json }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "47e61d52-412d-4ddc-b218-311edde75ae6",
+      "name": "有差异？",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1000,
+        500
+      ],
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $items(\"对比库存差异\").length }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "8a4859d4-4bf4-4a0c-94e1-9e0ac91030f8",
+      "name": "差异通知（预留）",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1250,
+        500
+      ],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "09:00 定时触发": {
+      "main": [
+        [
+          {
+            "node": "拉取惠程荣达库存",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "拉取惠程荣达库存": {
+      "main": [
+        [
+          {
+            "node": "合并库存数据",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "拉取TikTok库存": {
+      "main": [
+        [
+          {
+            "node": "合并库存数据",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "合并库存数据": {
+      "main": [
+        [
+          {
+            "node": "对比库存差异",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "对比库存差异": {
+      "main": [
+        [
+          {
+            "node": "同步差异到 TK-SaaS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "有差异？",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "同步差异到 TK-SaaS": {
+      "main": [
+        [
+          {
+            "node": "有差异？",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "有差异？": {
+      "main": [
+        [
+          {
+            "node": "差异通知（预留）",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {},
+  "staticData": null,
+  "tags": [],
+  "id": "b4fa19a3-d622-4892-a59c-fdea614836dd",
+  "versionId": "6431c2f7-0e21-474d-a41d-df30581503e1"
+}
