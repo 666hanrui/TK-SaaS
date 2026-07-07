@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "EchoTik 达人库导出助手",
+  "version": "1.0.0",
+  "description": "在 EchoTik 达人库页面一键导出 JSON/CSV，支持性别、粉丝画像、联系方式等筛选结果的批量采集。",
+  "permissions": ["activeTab", "storage"],
+  "host_permissions": ["https://echotik.live/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://echotik.live/influencers*"],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "EchoTik 达人库导出助手"
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}
