@@ -1,9 +1,13 @@
 node_modules/
 dist/
 .npm-cache/
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+.automation-data/
 .playwright-cli/
 output/
 .DS_Store
 .env
 *.local
-

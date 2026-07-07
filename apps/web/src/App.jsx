@@ -51,6 +51,7 @@ import {
 } from "./lib/operations";
 import { normalizeEchoTikCreatorRows, parseEchoTikCreatorImport } from "./lib/echotikImport";
 import { fetchInfluencerList, fetchInfluencerVideos, ECHOTIK_PAGE_SIZE, mapInfluencerToCreatorLead } from "./lib/echotikApi";
+import { runShippingSweep } from "./lib/shippingApi";
 
 const navIconMap = {
   dashboard: Home,
@@ -1411,9 +1412,31 @@ export function App() {
     window.setTimeout(() => setToastState(null), 1600);
   }
 
-  function runAutomation(taskId) {
+  async function runAutomation(taskId) {
+    const task = taskList.find((item) => item.id === taskId);
     updateTaskStatus(taskId, "processing");
-    showToast("自动化已启动");
+    if (task?.module !== "orders") {
+      showToast("该模块执行适配器正在接入", "failed");
+      return;
+    }
+
+    showToast("正在扫描并执行待发货订单");
+    try {
+      const result = await runShippingSweep();
+      const failed = result.jobs.filter((job) => job.run_status !== "completed");
+      if (failed.length > 0) {
+        showToast(
+          `完成 ${result.completed}/${result.discovered}，${failed.length} 个进入异常队列`,
+          "failed",
+        );
+        return;
+      }
+      updateTaskStatus(taskId, "done");
+      showToast(`全流程完成 ${result.completed}/${result.discovered} 单（${result.mode}）`);
+    } catch (error) {
+      updateTaskStatus(taskId, "open");
+      showToast(error instanceof Error ? error.message : "发货自动化启动失败", "failed");
+    }
   }
 
   function sendScript(taskId) {

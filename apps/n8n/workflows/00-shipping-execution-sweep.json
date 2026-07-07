@@ -1,0 +1,91 @@
+{
+  "name": "全自动发货执行 - Shipping Execution Sweep",
+  "nodes": [
+    {
+      "id": "e5b43031-54ec-4e54-a5ba-6395149e61bc",
+      "name": "每5分钟扫描",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [0, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "fe8431fb-9fae-4878-a783-ef0becdd99fc",
+      "name": "扫描并执行发货闭环",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [260, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/shipping/sweeps",
+        "sendBody": false,
+        "sendHeaders": true,
+        "options": {
+          "timeout": 240000
+        }
+      }
+    },
+    {
+      "id": "a4be5317-dd89-4313-a00e-fc4dedfe3fa5",
+      "name": "存在异常订单？",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [520, 300],
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.discovered - $json.completed }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "7eb8702c-19c1-4c2c-9dc0-6d3064fb14cb",
+      "name": "异常进入管理台",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [780, 220],
+      "parameters": {}
+    },
+    {
+      "id": "e1704a3e-b0c9-4169-961f-dfdbbb384c73",
+      "name": "本轮全部完成",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [780, 380],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "每5分钟扫描": {
+      "main": [[{"node": "扫描并执行发货闭环", "type": "main", "index": 0}]]
+    },
+    "扫描并执行发货闭环": {
+      "main": [[{"node": "存在异常订单？", "type": "main", "index": 0}]]
+    },
+    "存在异常订单？": {
+      "main": [
+        [{"node": "异常进入管理台", "type": "main", "index": 0}],
+        [{"node": "本轮全部完成", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "settings": {},
+  "staticData": null,
+  "tags": [],
+  "id": "128a1838-979e-4c8d-99c5-48756d133a1f",
+  "versionId": "0bf164ce-61b9-48c2-bdab-4909d2999eb0"
+}

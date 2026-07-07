@@ -7,6 +7,7 @@
 - [TikTok Shop 店铺运营自动化调研资料](./research/tiktok-shop-automation-research.md)
 - [TikTok Shop / 惠程荣达 API 可行性客观分析](./research/api-feasibility-analysis.md)
 - [可复用仓库重新分析：哪些能用、怎么用](./research/reusable-repo-analysis.md)
+- [TikTok → 惠程荣达完整人工发货动作分析](./research/full-shipping-operation-analysis.md)
 - [TK-SaaS 应用层实际执行计划](./specs/application-layer-execution-plan.md)
 
 ## 建议下一批文档

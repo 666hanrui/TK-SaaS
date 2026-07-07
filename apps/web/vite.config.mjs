@@ -53,6 +53,10 @@ export default defineConfig({
       clientFiles: ["./src/main.jsx"],
     },
     proxy: {
+      "/api/shipping": {
+        target: "http://127.0.0.1:8000",
+        changeOrigin: true,
+      },
       "/api/echotik": {
         target: "https://open.echotik.live",
         changeOrigin: true,
