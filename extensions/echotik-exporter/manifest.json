@@ -13,6 +13,12 @@
       "run_at": "document_start"
     }
   ],
+  "web_accessible_resources": [
+    {
+      "resources": ["injected.js"],
+      "matches": ["https://echotik.live/*"]
+    }
+  ],
   "action": {
     "default_popup": "popup.html",
     "default_title": "EchoTik 达人库导出助手"
