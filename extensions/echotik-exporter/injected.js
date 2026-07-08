@@ -58,12 +58,16 @@
     autoFetching = true;
 
     const startPage = getCurrentPage(baseUrl) + 1;
+    const seenIds = new Set();
+    let totalNew = 0;
+    let totalDup = 0;
 
     try {
       for (let offset = 0; offset < pages; offset++) {
         const page = startPage + offset;
         const url = buildApiUrl(baseUrl, page);
         sendProgress(`正在采集第 ${page} 页...`);
+        console.log(`[EchoTik Exporter] fetching ${url}`);
 
         const response = await fetch(url, {
           headers: {
@@ -77,6 +81,8 @@
           credentials: 'include',
         });
 
+        console.log(`[EchoTik Exporter] page ${page} status ${response.status}`);
+
         const contentType = response.headers.get('content-type') || '';
         if (!contentType.includes('application/json')) {
           const text = await response.text();
@@ -87,20 +93,38 @@
 
         const json = await response.json();
         if (json && json.code === 0 && Array.isArray(json.data)) {
+          let pageNew = 0;
+          let pageDup = 0;
+          for (const item of json.data) {
+            if (!item || !item.influencer_id) continue;
+            if (seenIds.has(item.influencer_id)) {
+              pageDup++;
+            } else {
+              seenIds.add(item.influencer_id);
+              pageNew++;
+            }
+          }
+          totalNew += pageNew;
+          totalDup += pageDup;
+
           sendToExtension(json.data);
+          sendProgress(`第 ${page} 页: ${json.data.length} 条（新增 ${pageNew} / 重复 ${pageDup}）`);
+          console.log(`[EchoTik Exporter] page ${page} total=${json.data.length} new=${pageNew} dup=${pageDup}`);
+
           if (json.data.length === 0) {
-            sendComplete(`第 ${page} 页无数据，自动采集结束`);
+            sendComplete(`第 ${page} 页无数据，自动采集结束。累计新增 ${totalNew} 条，重复 ${totalDup} 条。`);
             break;
           }
         } else {
-          sendComplete(`第 ${page} 页返回异常，自动采集结束`);
+          sendComplete(`第 ${page} 页返回异常（code=${json?.code}），自动采集结束`);
+          console.error('[EchoTik Exporter] unexpected response:', json);
           break;
         }
 
         await new Promise((resolve) => setTimeout(resolve, 1500 + Math.random() * 1000));
       }
 
-      sendComplete('自动采集完成');
+      sendComplete(`自动采集完成。累计新增 ${totalNew} 条，重复 ${totalDup} 条。`);
     } catch (error) {
       sendComplete(`自动采集出错: ${error.message}`);
       console.error('[EchoTik Exporter] auto fetch error:', error);
