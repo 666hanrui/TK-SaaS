@@ -28,8 +28,27 @@
    - 是否有邮箱 = 有
    - 粉丝画像 = 女性居多
 4. 翻页或滚动加载更多达人，面板计数会自动增加
-5. 点击「导出 CSV」或「导出 JSON」下载文件
-6. 下载的 CSV 可直接导入本项目的「达人 CRM」
+5. 点击「自动采集 N 页」可自动抓取后续 N 页（无需手动翻页）
+6. 点击「导出 CSV」或「导出 JSON」下载文件
+7. 下载的 CSV 可直接导入本项目的「达人 CRM」
+
+## 自动采集
+
+- 设置好筛选条件后，点击面板里的「自动采集 N 页」
+- 输入想要采集的页数（从当前页之后开始）
+- 扩展会自动调用 EchoTik 内部 API 翻页，每页间隔 1.5~2.5 秒
+- 采集过程中请勿关闭页面或切换标签
+
+## 族裔/性别/年龄 Enrichment
+
+导出的 JSON/CSV 可以用 `tools/creator-enrichment/enrich.py` 做二次 enrichment：
+
+```bash
+cd tools/creator-enrichment
+python enrich.py --input ../../apps/web/output/inspect/echotik-web-xxx.json
+```
+
+详见 `tools/creator-enrichment/README.md`。
 
 ## 注意事项
 

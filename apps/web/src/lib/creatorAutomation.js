@@ -35,6 +35,11 @@ function getCreatorProfileUrl(creator) {
 
 export function buildCreatorAutomationPayload(creator, options = {}) {
   const evaluation = evaluateCreatorLead(creator, options.now ?? new Date());
+  const action = options.action || "draft";
+  const isRecordSentAction = action === "record_sent";
+  const confirmedAt = options.confirmedAt || creator.automation?.outreach?.confirmedAt;
+  const confirmedBy = options.confirmedBy || creator.automation?.outreach?.confirmedBy;
+  const draft = options.draft || creator.automation?.outreach?.draft || "";
   const recentVideos = (creator.recentVideos ?? []).slice(0, 10).map((video) =>
     compactObject({
       id: video.id,
@@ -52,11 +57,18 @@ export function buildCreatorAutomationPayload(creator, options = {}) {
   );
 
   return {
-    action: options.action || "draft",
-    allowSend: false,
-    dryRun: options.dryRun !== false,
+    action,
+    allowSend: Boolean(isRecordSentAction && options.allowSend && confirmedAt),
+    dryRun: isRecordSentAction ? false : options.dryRun !== false,
     requestedAt: options.requestedAt || new Date().toISOString(),
     source: "tk-saas-web",
+    confirmation: compactObject({
+      confirmedAt,
+      confirmedBy,
+    }),
+    message: compactObject({
+      draft,
+    }),
     creator: compactObject({
       id: creator.id,
       rawId: creator.rawId,
@@ -134,10 +146,13 @@ export function applyCreatorAutomationResult(creators, creatorId, result) {
       source: result.source ?? previousOutreach.source ?? "local",
       draft: result.draft ?? result.message ?? previousOutreach.draft ?? "",
       error: result.error ?? (["failed", "blocked"].includes(status) ? result.message : "") ?? "",
+      confirmedAt: result.confirmedAt ?? previousOutreach.confirmedAt,
+      confirmedBy: result.confirmedBy ?? previousOutreach.confirmedBy,
+      sentAt: result.sentAt ?? previousOutreach.sentAt,
       requestedAt: result.requestedAt ?? previousOutreach.requestedAt,
       updatedAt: result.updatedAt ?? new Date().toISOString(),
       dryRun: result.dryRun !== false,
-      allowSend: false,
+      allowSend: Boolean(result.allowSend),
       history: [
         ...(previousOutreach.history ?? []),
         compactObject({
@@ -145,6 +160,8 @@ export function applyCreatorAutomationResult(creators, creatorId, result) {
           status: result.status ?? "queued",
           source: result.source,
           message: result.message,
+          confirmedAt: result.confirmedAt,
+          sentAt: result.sentAt,
           updatedAt: result.updatedAt ?? new Date().toISOString(),
         }),
       ],
@@ -152,6 +169,7 @@ export function applyCreatorAutomationResult(creators, creatorId, result) {
 
     return {
       ...creator,
+      crmStatus: result.crmStatus ?? creator.crmStatus,
       automation: {
         ...creator.automation,
         outreach: nextOutreach,

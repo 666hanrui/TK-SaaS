@@ -119,4 +119,70 @@ describe("creator outreach automation", () => {
     expect(updated[0].automation.outreach.history).toHaveLength(1);
     expect(originalList[0].automation).toBeUndefined();
   });
+
+  it("builds an explicit record-sent payload only after human confirmation", () => {
+    const payload = buildCreatorAutomationPayload(creator, {
+      action: "record_sent",
+      allowSend: true,
+      confirmedAt: "2026-07-07T10:05:00.000Z",
+      confirmedBy: "operator",
+      draft: "Approved draft",
+      requestedAt: "2026-07-07T10:06:00.000Z",
+    });
+
+    expect(payload).toMatchObject({
+      action: "record_sent",
+      allowSend: true,
+      dryRun: false,
+      confirmation: {
+        confirmedAt: "2026-07-07T10:05:00.000Z",
+        confirmedBy: "operator",
+      },
+      message: {
+        draft: "Approved draft",
+      },
+    });
+  });
+
+  it("records human confirmation and sent status in the creator CRM history", () => {
+    const withDraft = applyCreatorAutomationResult([{ ...creator, crmStatus: "ready_to_contact" }], creator.id, {
+      queueId: "queue-1",
+      status: "draft_ready",
+      source: "n8n-webhook",
+      draft: "Draft message",
+      updatedAt: "2026-07-07T10:01:00.000Z",
+    });
+
+    const confirmed = applyCreatorAutomationResult(withDraft, creator.id, {
+      queueId: "queue-2",
+      status: "confirmed",
+      source: "manual-confirm",
+      confirmedAt: "2026-07-07T10:05:00.000Z",
+      confirmedBy: "operator",
+      updatedAt: "2026-07-07T10:05:00.000Z",
+    });
+
+    const sent = applyCreatorAutomationResult(confirmed, creator.id, {
+      queueId: "queue-3",
+      status: "sent",
+      source: "manual-send-record",
+      crmStatus: "contacted",
+      sentAt: "2026-07-07T10:08:00.000Z",
+      updatedAt: "2026-07-07T10:08:00.000Z",
+    });
+
+    expect(sent[0].crmStatus).toBe("contacted");
+    expect(sent[0].automation.outreach).toMatchObject({
+      status: "sent",
+      confirmedAt: "2026-07-07T10:05:00.000Z",
+      confirmedBy: "operator",
+      sentAt: "2026-07-07T10:08:00.000Z",
+      draft: "Draft message",
+    });
+    expect(sent[0].automation.outreach.history.map((event) => event.status)).toEqual([
+      "draft_ready",
+      "confirmed",
+      "sent",
+    ]);
+  });
 });

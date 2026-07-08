@@ -132,6 +132,8 @@ const creatorAutomationTone = {
   queueing: "processing",
   queued: "processing",
   draft_ready: "done",
+  confirmed: "open",
+  sent: "done",
   failed: "danger",
   blocked: "warning",
 };
@@ -142,6 +144,8 @@ function getCreatorAutomationLabel(status) {
       queueing: "提交中",
       queued: "已入队",
       draft_ready: "草稿就绪",
+      confirmed: "人工已确认",
+      sent: "已联系",
       failed: "失败",
       blocked: "已阻止",
     }[status] ?? "未生成"
@@ -1120,8 +1124,10 @@ function CreatorVideoList({ creator }) {
 function CreatorDetailDrawer({
   creator,
   isAutomationRunning,
+  onConfirmOutreachDraft,
   onContactChange,
   onQueueOutreachDraft,
+  onRecordOutreachSent,
   onStatusChange,
 }) {
   if (!creator) {
@@ -1139,6 +1145,8 @@ function CreatorDetailDrawer({
   const nextStage = getNextCreatorStage(creator.crmStatus);
   const outreach = creator.automation?.outreach;
   const outreachStatus = outreach?.status || "not_started";
+  const canConfirmDraft = outreachStatus === "draft_ready" && Boolean(outreach?.draft);
+  const canRecordSent = outreachStatus === "confirmed";
   const checklist = [
     ["打开 TikTok 主页", Boolean(profileUrl)],
     ["确认公开邮箱", Boolean(creator.contact?.email)],
@@ -1292,6 +1300,8 @@ function CreatorDetailDrawer({
             <Field label="执行模式" value="Dry-run 草稿，不自动发送" />
             <Field label="队列来源" value={outreach?.source || "待提交"} />
             <Field label="队列 ID" value={outreach?.queueId || "--"} />
+            <Field label="确认时间" value={outreach?.confirmedAt ? formatShortDate(outreach.confirmedAt) : "--"} />
+            <Field label="发送回写" value={outreach?.sentAt ? formatShortDate(outreach.sentAt) : "--"} />
             <Field label="更新时间" value={outreach?.updatedAt ? formatShortDate(outreach.updatedAt) : "--"} />
           </div>
           {outreach?.draft ? (
@@ -1300,15 +1310,39 @@ function CreatorDetailDrawer({
             <p>点击生成草稿后，系统会把达人证据和联系方式写入本地队列；如配置 n8n webhook，会同步请求 n8n 生成草稿。</p>
           )}
           {outreach?.error ? <p className="outreach-error">{outreach.error}</p> : null}
-          <button
-            className="inline-automation"
-            disabled={isAutomationRunning}
-            onClick={() => onQueueOutreachDraft(creator.id)}
-            type="button"
-          >
-            <Sparkles size={16} />
-            {isAutomationRunning ? "提交中" : "生成联系草稿"}
-          </button>
+          <div className="outreach-action-row">
+            <button
+              className="inline-automation"
+              disabled={isAutomationRunning}
+              onClick={() => onQueueOutreachDraft(creator.id)}
+              type="button"
+            >
+              <Sparkles size={16} />
+              {isAutomationRunning ? "提交中" : "生成联系草稿"}
+            </button>
+            {canConfirmDraft ? (
+              <button
+                className="inline-automation secondary"
+                disabled={isAutomationRunning}
+                onClick={() => onConfirmOutreachDraft(creator.id)}
+                type="button"
+              >
+                <Check size={16} />
+                人工确认草稿
+              </button>
+            ) : null}
+            {canRecordSent ? (
+              <button
+                className="inline-automation secondary"
+                disabled={isAutomationRunning}
+                onClick={() => onRecordOutreachSent(creator.id)}
+                type="button"
+              >
+                <Send size={16} />
+                确认已发送并回写
+              </button>
+            ) : null}
+          </div>
         </section>
       </div>
 
@@ -1668,25 +1702,21 @@ export function App() {
     );
   }
 
-  async function queueCreatorOutreachDraft(creatorId) {
+  async function submitCreatorAutomationAction(creatorId, payload, pendingResult, successMessage, failurePrefix) {
     const creator = creatorList.find((item) => item.id === creatorId);
 
     if (!creator || creatorAutomationBusyId) {
       return;
     }
 
-    const requestedAt = new Date().toISOString();
-    const payload = buildCreatorAutomationPayload(creator, { requestedAt });
-
     setCreatorAutomationBusyId(creatorId);
     setCreatorList((current) =>
       applyCreatorAutomationResult(current, creatorId, {
-        status: "queueing",
+        ...pendingResult,
+        status: pendingResult.status || "queueing",
         source: "tk-saas-web",
-        requestedAt,
-        updatedAt: requestedAt,
-        dryRun: true,
-        allowSend: false,
+        requestedAt: payload.requestedAt,
+        updatedAt: payload.requestedAt,
       }),
     );
 
@@ -1705,29 +1735,109 @@ export function App() {
       setCreatorList((current) =>
         applyCreatorAutomationResult(current, creatorId, {
           ...result,
-          requestedAt,
-          dryRun: true,
-          allowSend: false,
+          requestedAt: payload.requestedAt,
         }),
       );
-      showToast(result.n8nConfigured ? "n8n 草稿已生成并回写" : "Dry-run 草稿已生成，队列已落盘");
+      showToast(typeof successMessage === "function" ? successMessage(result) : successMessage);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "达人联系自动化提交失败";
+      const message = error instanceof Error ? error.message : `${failurePrefix}失败`;
       setCreatorList((current) =>
         applyCreatorAutomationResult(current, creatorId, {
           status: "failed",
           source: "tk-saas-web",
           error: message,
-          requestedAt,
+          requestedAt: payload.requestedAt,
           updatedAt: new Date().toISOString(),
           dryRun: true,
           allowSend: false,
         }),
       );
-      showToast(`草稿生成失败：${message}`, "failed");
+      showToast(`${failurePrefix}失败：${message}`, "failed");
     } finally {
       setCreatorAutomationBusyId(null);
     }
+  }
+
+  async function queueCreatorOutreachDraft(creatorId) {
+    const creator = creatorList.find((item) => item.id === creatorId);
+    if (!creator) return;
+
+    const requestedAt = new Date().toISOString();
+    const payload = buildCreatorAutomationPayload(creator, { requestedAt });
+
+    await submitCreatorAutomationAction(
+      creatorId,
+      payload,
+      {
+        status: "queueing",
+        dryRun: true,
+        allowSend: false,
+      },
+      (result) => (result.n8nConfigured ? "n8n 草稿已生成并回写" : "Dry-run 草稿已生成，队列已落盘"),
+      "草稿生成",
+    );
+  }
+
+  async function confirmCreatorOutreachDraft(creatorId) {
+    const creator = creatorList.find((item) => item.id === creatorId);
+    const draft = creator?.automation?.outreach?.draft;
+    if (!creator || !draft) {
+      showToast("请先生成草稿", "failed");
+      return;
+    }
+
+    const requestedAt = new Date().toISOString();
+    const confirmedAt = requestedAt;
+    const payload = buildCreatorAutomationPayload(creator, {
+      action: "confirm",
+      requestedAt,
+      confirmedAt,
+      confirmedBy: "operator",
+      draft,
+    });
+
+    await submitCreatorAutomationAction(
+      creatorId,
+      payload,
+      {
+        status: "queueing",
+        dryRun: true,
+        allowSend: false,
+      },
+      "草稿已人工确认",
+      "草稿确认",
+    );
+  }
+
+  async function recordCreatorOutreachSent(creatorId) {
+    const creator = creatorList.find((item) => item.id === creatorId);
+    const outreach = creator?.automation?.outreach;
+    if (!creator || outreach?.status !== "confirmed" || !outreach?.confirmedAt) {
+      showToast("请先人工确认草稿", "failed");
+      return;
+    }
+
+    const requestedAt = new Date().toISOString();
+    const payload = buildCreatorAutomationPayload(creator, {
+      action: "record_sent",
+      allowSend: true,
+      requestedAt,
+      confirmedAt: outreach.confirmedAt,
+      confirmedBy: outreach.confirmedBy || "operator",
+      draft: outreach.draft,
+    });
+
+    await submitCreatorAutomationAction(
+      creatorId,
+      payload,
+      {
+        status: "queueing",
+        dryRun: false,
+        allowSend: true,
+      },
+      "已回写为已联系",
+      "发送回写",
+    );
   }
 
   function toggleCreatorStar(creatorId) {
@@ -2029,8 +2139,10 @@ export function App() {
         <CreatorDetailDrawer
           creator={selectedCreator}
           isAutomationRunning={creatorAutomationBusyId === selectedCreator?.id}
+          onConfirmOutreachDraft={confirmCreatorOutreachDraft}
           onContactChange={updateCreatorContact}
           onQueueOutreachDraft={queueCreatorOutreachDraft}
+          onRecordOutreachSent={recordCreatorOutreachSent}
           onStatusChange={updateCreatorCrmStatus}
         />
       ) : (

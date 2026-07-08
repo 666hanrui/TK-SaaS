@@ -254,19 +254,37 @@ function creatorAutomationPlugin() {
         try {
           const payload = JSON.parse((await readRequestBody(req)) || "{}");
           const creator = payload.creator ?? {};
+          const action = payload.action || "draft";
+          const allowedActions = new Set(["draft", "confirm", "record_sent"]);
 
           if (!creator.id) {
             sendJson(res, 400, { ok: false, message: "creator.id is required" });
             return;
           }
 
-          if (payload.action === "send" || payload.allowSend === true || payload.dryRun === false) {
+          if (!allowedActions.has(action)) {
+            sendJson(res, 400, { ok: false, message: `Unsupported creator automation action: ${action}` });
+            return;
+          }
+
+          if (action === "draft" && (payload.allowSend === true || payload.dryRun === false)) {
             sendJson(res, 409, {
               ok: false,
               status: "blocked",
               allowSend: false,
               dryRun: true,
               message: "Automatic outreach sending is disabled. Generate a draft first.",
+            });
+            return;
+          }
+
+          if (action === "record_sent" && !payload.confirmation?.confirmedAt) {
+            sendJson(res, 409, {
+              ok: false,
+              status: "blocked",
+              allowSend: false,
+              dryRun: true,
+              message: "Human confirmation is required before recording outreach as sent.",
             });
             return;
           }
@@ -278,10 +296,10 @@ function creatorAutomationPlugin() {
             id: queueId,
             requestedAt: payload.requestedAt || now,
             updatedAt: now,
-            action: "draft",
+            action,
             status: "queued",
-            dryRun: true,
-            allowSend: false,
+            dryRun: action === "record_sent" ? false : true,
+            allowSend: Boolean(action === "record_sent" && payload.allowSend),
             creatorId: creator.id,
             creatorName: creator.displayName,
             creatorHandle: creator.handle,
@@ -290,10 +308,12 @@ function creatorAutomationPlugin() {
             metrics: creator.metrics,
             matchedKeywords: creator.matchedKeywords ?? [],
             evidence: creator.evidence,
+            confirmation: payload.confirmation,
+            message: payload.message,
             payload: {
               ...payload,
-              dryRun: true,
-              allowSend: false,
+              dryRun: action === "record_sent" ? false : true,
+              allowSend: Boolean(action === "record_sent" && payload.allowSend),
             },
           };
 
@@ -301,9 +321,66 @@ function creatorAutomationPlugin() {
           await writeAutomationQueue(automationDir, queue);
 
           const n8nWebhookUrl = process.env.N8N_CREATOR_OUTREACH_WEBHOOK_URL;
+          const n8nSendWebhookUrl = process.env.N8N_CREATOR_OUTREACH_SEND_WEBHOOK_URL;
           let result;
 
-          if (n8nWebhookUrl) {
+          if (action === "confirm") {
+            result = {
+              ok: true,
+              queueId,
+              status: "confirmed",
+              source: "manual-confirm",
+              confirmedAt: payload.confirmation?.confirmedAt || now,
+              confirmedBy: payload.confirmation?.confirmedBy || "operator",
+              draft: payload.message?.draft || "",
+              dryRun: true,
+              allowSend: false,
+              updatedAt: now,
+            };
+          } else if (action === "record_sent") {
+            if (n8nSendWebhookUrl) {
+              const n8nResult = await postJson(n8nSendWebhookUrl, {
+                ...payload,
+                queueId,
+                dryRun: false,
+                allowSend: true,
+              });
+
+              result = {
+                ok: true,
+                queueId,
+                status: n8nResult.status || "sent",
+                source: "n8n-send-webhook",
+                crmStatus: n8nResult.crmStatus || "contacted",
+                confirmedAt: payload.confirmation?.confirmedAt,
+                confirmedBy: payload.confirmation?.confirmedBy,
+                sentAt: n8nResult.sentAt || new Date().toISOString(),
+                draft: payload.message?.draft || "",
+                message: n8nResult.message || "Outreach send webhook completed.",
+                dryRun: false,
+                allowSend: true,
+                updatedAt: new Date().toISOString(),
+                n8nConfigured: true,
+              };
+            } else {
+              result = {
+                ok: true,
+                queueId,
+                status: "sent",
+                source: "manual-send-record",
+                crmStatus: "contacted",
+                confirmedAt: payload.confirmation?.confirmedAt,
+                confirmedBy: payload.confirmation?.confirmedBy,
+                sentAt: new Date().toISOString(),
+                draft: payload.message?.draft || "",
+                message: "Human operator confirmed outreach was sent; CRM status recorded.",
+                dryRun: false,
+                allowSend: true,
+                updatedAt: new Date().toISOString(),
+                n8nConfigured: false,
+              };
+            }
+          } else if (n8nWebhookUrl) {
             const n8nResult = await postJson(n8nWebhookUrl, {
               ...payload,
               queueId,
@@ -350,6 +427,11 @@ function creatorAutomationPlugin() {
                   updatedAt: result.updatedAt,
                   source: result.source,
                   draft: result.draft,
+                  message: result.message,
+                  confirmedAt: result.confirmedAt,
+                  confirmedBy: result.confirmedBy,
+                  sentAt: result.sentAt,
+                  crmStatus: result.crmStatus,
                   n8nConfigured: result.n8nConfigured,
                 }
               : queueEntry,

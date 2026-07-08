@@ -194,6 +194,7 @@
       </div>
       <div class="echotik-export-body">
         <button class="echotik-export-btn" data-action="clear">清空</button>
+        <button class="echotik-export-btn" data-action="auto">自动采集 N 页</button>
         <button class="echotik-export-btn primary" data-action="json">导出 JSON</button>
         <button class="echotik-export-btn primary" data-action="csv">导出 CSV</button>
       </div>
@@ -240,6 +241,23 @@
       setStatus(`已导出 ${captured.length} 条 CSV`);
       return;
     }
+
+    if (action === 'auto') {
+      const pages = prompt('请输入要自动采集的页数（从当前页之后开始）：', '5');
+      const numPages = parseInt(pages, 10);
+      if (!numPages || numPages <= 0) {
+        setStatus('取消自动采集');
+        return;
+      }
+      window.postMessage({
+        source: 'echotik-exporter',
+        type: 'auto-fetch',
+        pages: numPages,
+        baseUrl: window.location.href,
+      }, '*');
+      setStatus(`已启动自动采集 ${numPages} 页，请勿关闭页面`);
+      return;
+    }
   }
 
   function injectInterceptor() {
@@ -258,8 +276,12 @@
 
     window.addEventListener('message', (event) => {
       if (event.source !== window) return;
-      if (event.data && event.data.source === 'echotik-exporter' && event.data.type === 'captured') {
+      if (!event.data || event.data.source !== 'echotik-exporter') return;
+
+      if (event.data.type === 'captured') {
         addRecord(event.data.data);
+      } else if (event.data.type === 'progress' || event.data.type === 'complete') {
+        setStatus(event.data.message);
       }
     });
 
