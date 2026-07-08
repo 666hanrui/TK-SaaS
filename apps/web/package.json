@@ -7,7 +7,9 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "vitest run"
+    "test": "vitest run",
+    "echotik:login": "node scripts/fetch-echotik-web.mjs --login",
+    "echotik:contacts": "node scripts/fetch-echotik-contacts.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "5.0.4",
