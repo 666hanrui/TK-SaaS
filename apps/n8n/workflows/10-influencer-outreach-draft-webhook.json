@@ -1,0 +1,74 @@
+{
+  "name": "达人外联草稿 - Creator Outreach Draft Webhook",
+  "nodes": [
+    {
+      "id": "creator-outreach-webhook",
+      "name": "Webhook 接收达人草稿请求",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "creator-outreach-draft",
+      "parameters": {
+        "path": "creator-outreach-draft",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "build-draft",
+      "name": "安全生成 Dry-run 草稿",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst body = input.body || input;\nconst creator = body.creator || {};\n\nif (body.action === 'send' || body.allowSend === true || body.dryRun === false) {\n  return [{\n    json: {\n      ok: false,\n      status: 'blocked',\n      queueId: body.queueId || '',\n      dryRun: true,\n      allowSend: false,\n      source: 'n8n-dry-run',\n      message: 'Automatic outreach sending is disabled. Generate a draft first.',\n      updatedAt: new Date().toISOString(),\n    },\n  }];\n}\n\nconst name = creator.displayName || creator.handle || 'there';\nconst handle = String(creator.handle || '').replace(/^@/, '');\nconst keywords = Array.isArray(creator.matchedKeywords) ? creator.matchedKeywords.slice(0, 4) : [];\nconst metrics = creator.metrics || {};\nconst videos = creator.evidence?.recentVideos || [];\nconst nicheLine = keywords.length\n  ? `Your content fits our ${keywords.join(' / ')} creator list.`\n  : 'Your beauty and hair content fits our creator list.';\nconst profileLine = handle ? `I found your TikTok @${handle}` : 'I found your TikTok profile';\nconst proof = [\n  metrics.followers ? `${metrics.followers} followers` : '',\n  metrics.avgViews30d ? `${metrics.avgViews30d} avg views in 30 days` : '',\n  metrics.productVideoCount ? `${metrics.productVideoCount} commerce/product signals` : '',\n].filter(Boolean).join(', ');\nconst proofLine = proof ? ` The EchoTik evidence I checked: ${proof}.` : '';\nconst videoLine = videos.length ? ` I also checked ${videos.length} recent/high-play videos before drafting this.` : '';\n\nconst draft = [\n  `Hi ${name},`,\n  '',\n  `${profileLine} and liked the way your hair content connects with your audience. ${nicheLine}${proofLine}${videoLine}`,\n  '',\n  'We are preparing a first collaboration wave for drawstring ponytail, half wig, crochet hair, and braids products. The starting offer is free product + paid collaboration + commission, with TikTok Shop videos as the main deliverable.',\n  '',\n  'Would you be open to reviewing the details if the product style matches your audience?',\n  '',\n  'Best regards',\n  'TK-SaaS Creator Team',\n].join('\\n');\n\nreturn [{\n  json: {\n    ok: true,\n    queueId: body.queueId || '',\n    status: 'draft_ready',\n    source: 'n8n-dry-run',\n    draft,\n    dryRun: true,\n    allowSend: false,\n    creatorId: creator.id || '',\n    creatorHandle: handle,\n    videosChecked: videos.length,\n    updatedAt: new Date().toISOString(),\n  },\n}];"
+      }
+    },
+    {
+      "id": "respond-draft",
+      "name": "返回草稿结果",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        760,
+        300
+      ],
+      "parameters": {
+        "respondWith": "firstIncomingItem"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook 接收达人草稿请求": {
+      "main": [
+        [
+          {
+            "node": "安全生成 Dry-run 草稿",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "安全生成 Dry-run 草稿": {
+      "main": [
+        [
+          {
+            "node": "返回草稿结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {},
+  "active": false
+}

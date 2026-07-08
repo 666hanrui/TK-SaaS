@@ -157,7 +157,14 @@ export function evaluateCreatorLead(lead, now = new Date()) {
   const latestVideos = getLatestVideos(lead.recentVideos);
   const stableVideoCount = latestVideos.filter((video) => Number(video.views ?? 0) > 1000).length;
   const daysSinceLastPost = getDaysSinceLastPost(latestVideos, now);
-  const productVideoCount = (lead.productAssociatedVideos ?? []).length;
+  const productVideoCount = Math.max(
+    (lead.productAssociatedVideos ?? []).length,
+    Number(lead.totalProductCnt ?? 0),
+    (lead.recentVideos ?? []).filter(
+      (video) => video?.hasProducts || (video?.productIds ?? []).length > 0 || Number(video?.salesCount ?? 0) > 0,
+    ).length,
+    lead.salesFlag ? 1 : 0,
+  );
   const keywordCount = (lead.matchedKeywords ?? []).length;
   const gaps = [];
 

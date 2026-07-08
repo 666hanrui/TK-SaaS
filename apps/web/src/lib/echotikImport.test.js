@@ -24,7 +24,7 @@ describe("EchoTik import adapter", () => {
       profileUrl: "https://www.tiktok.com/@cuidarteesvida",
       highPerformingCoverUrl: "https://cdn.example.com/video.jpg",
       matchedKeywords: ["drawstring ponytail", "braids"],
-      productAssociatedVideos: ["echotik-7435688833042023466-product-1", "echotik-7435688833042023466-product-2", "echotik-7435688833042023466-product-3"],
+      productAssociatedVideos: [],
       contact: {
         email: "brand@creator.test",
       },
@@ -71,7 +71,9 @@ describe("EchoTik import adapter", () => {
       contact: {
         email: "yoesbrandcollab@gmail.com",
       },
-      sourceDataWarnings: ["粉丝字段缺失", "播放字段缺失", "商品关联字段缺失"],
+      avatarUrl: "https://cdn.echotik.live/avatar.jpg",
+      highPerformingCoverUrl: "",
+      sourceDataWarnings: ["粉丝字段缺失", "视频明细缺失", "商品关联字段缺失"],
     });
   });
 
@@ -117,7 +119,41 @@ describe("EchoTik import adapter", () => {
         socialAccount: "Instagram: https://www.instagram.com/houseof.foils",
       },
     });
-    expect(leads[0].recentVideos.length).toBeGreaterThan(0);
+    expect(leads[0].recentVideos).toEqual([]);
+    expect(leads[0].sourceDataWarnings).toEqual(["视频明细缺失"]);
+  });
+
+  it("does not turn average view fields into fake videos", () => {
+    const leads = parseEchoTikCreatorImport(
+      "Influencer,TikTok ID,Followers,Avg. views per video,No. of Products\nAverage Only,averageonly,12000,5800,2",
+      { sourceName: "average-only.csv" },
+    );
+
+    expect(leads[0].avgViews30d).toBe(5800);
+    expect(leads[0].recentVideos).toEqual([]);
+    expect(leads[0].sourceDataWarnings).toContain("视频明细缺失");
+  });
+
+  it("maps real video IDs and links from indexed EchoTik export columns", () => {
+    const csv = [
+      "Influencer,TikTok ID,Followers,No. of Products,Video 1 ID,Video 1 URL,Video 1 Views,Video 1 Date,Video 1 Title",
+      "Braids Studio,braidsstudio,18000,4,7491320626129456415,https://www.tiktok.com/@braidsstudio/video/7491320626129456415,26000,2026-07-04,Protective braids install",
+    ].join("\n");
+
+    const leads = parseEchoTikCreatorImport(csv, { sourceName: "videos.csv" });
+
+    expect(leads[0].recentVideos).toEqual([
+      {
+        id: "7491320626129456415",
+        videoId: "7491320626129456415",
+        videoUrl: "https://www.tiktok.com/@braidsstudio/video/7491320626129456415",
+        shareUrl: "https://www.tiktok.com/@braidsstudio/video/7491320626129456415",
+        views: 26000,
+        createDate: "2026-07-04",
+        title: "Protective braids install",
+        description: "Protective braids install",
+      },
+    ]);
     expect(leads[0].sourceDataWarnings).toEqual([]);
   });
 });

@@ -1,0 +1,232 @@
+{
+  "name": "\u8fbe\u4eba\u5916\u8054 - Influencer Outreach",
+  "nodes": [
+    {
+      "id": "schedule-trigger",
+      "name": "\u5b9a\u65f6\u89e6\u53d1\uff08\u6bcf\u59299\u70b9\uff09",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "minutesInterval": 1440
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "read-list",
+      "name": "\u8bfb\u53d6\u8fbe\u4eba\u5217\u8868",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        450,
+        300
+      ],
+      "parameters": {
+        "url": "=http://localhost:3000/api/v1/accounts/3/custom_attributes/influencers",
+        "options": {
+          "headers": {
+            "api_access_token": "8JL8W3RBMQF13kSmGSsyLqSy"
+          }
+        }
+      }
+    },
+    {
+      "id": "split-items",
+      "name": "\u9010\u4e2a\u53d1\u9001",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 2,
+      "position": [
+        650,
+        300
+      ],
+      "parameters": {
+        "batchSize": 1
+      }
+    },
+    {
+      "id": "gen-message",
+      "name": "Qwen \u751f\u6210\u4e2a\u6027\u5316\u9080\u8bf7",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        850,
+        300
+      ],
+      "parameters": {
+        "url": "http://192.168.9.111:8080/v1/chat/completions",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "default"
+            },
+            {
+              "name": "max_tokens",
+              "value": 400
+            },
+            {
+              "name": "temperature",
+              "value": 0.8
+            },
+            {
+              "name": "messages",
+              "value": [
+                {
+                  "role": "system",
+                  "content": "You are a PR manager from Estrella Hair (hair extension brand). Generate a personalized collaboration invitation for an influencer. Keep it natural and not template-like. Sign with 'Best regards\\nEstrella Hair PR Team'."
+                },
+                {
+                  "role": "user",
+                  "content": "=Create a collaboration invitation for {{ $json.name || 'influencer' }}.\nTheir platform: {{ $json.platform || 'TikTok' }}\nTheir niche: {{ $json.niche || 'beauty' }}\nProduct: Clip&Drawstring Ponytail\nOffer: Paid collaboration + free product + 5% commission\nRequirements: 2 TikTok Shop videos + 365-day ads code"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "delay-node",
+      "name": "\u7b49\u5f85\u968f\u673a\u65f6\u95f4\uff08\u53cd\u98ce\u63a7\uff09",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        1050,
+        300
+      ],
+      "parameters": {
+        "resume": "afterTimeInterval",
+        "amount": 5,
+        "unit": "minutes"
+      }
+    },
+    {
+      "id": "send-email",
+      "name": "\u53d1\u9001\u90ae\u4ef6",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [
+        1250,
+        250
+      ],
+      "parameters": {
+        "fromEmail": "pr@estrella-hair.com",
+        "toEmail": "={{ $json.email }}",
+        "subject": "=Collaboration: Estrella Hair x {{ $json.name }}",
+        "text": "={{ $json.choices[0].message.content }}"
+      }
+    },
+    {
+      "id": "log-result",
+      "name": "\u8bb0\u5f55\u53d1\u9001\u7ed3\u679c",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        1250,
+        400
+      ],
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "influencer",
+              "value": "={{ $json.name }}"
+            },
+            {
+              "name": "email",
+              "value": "={{ $json.email }}"
+            },
+            {
+              "name": "sent_at",
+              "value": "={{ new Date().toISOString() }}"
+            },
+            {
+              "name": "status",
+              "value": "sent"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "connections": {
+    "schedule-trigger": {
+      "main": [
+        [
+          {
+            "node": "read-list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "read-list": {
+      "main": [
+        [
+          {
+            "node": "split-items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "split-items": {
+      "main": [
+        [
+          {
+            "node": "gen-message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "gen-message": {
+      "main": [
+        [
+          {
+            "node": "delay-node",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "delay-node": {
+      "main": [
+        [
+          {
+            "node": "send-email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "send-email": {
+      "main": [
+        [
+          {
+            "node": "log-result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {},
+  "active": false
+}

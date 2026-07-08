@@ -2,6 +2,8 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import http from "http";
 import https from "https";
+import fs from "fs/promises";
+import path from "path";
 
 function echotikCdnProxy() {
   return {
@@ -44,6 +46,331 @@ function echotikCdnProxy() {
   };
 }
 
+function creatorBackupPlugin() {
+  return {
+    name: "creator-backup",
+    configureServer(server) {
+      server.middlewares.use("/api/local/creator-backup", (req, res) => {
+        if (req.method !== "POST") {
+          res.writeHead(405, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, message: "Method not allowed" }));
+          return;
+        }
+
+        let body = "";
+        req.setEncoding("utf8");
+        req.on("data", (chunk) => {
+          body += chunk;
+          if (body.length > 50 * 1024 * 1024) {
+            req.destroy();
+          }
+        });
+        req.on("end", async () => {
+          try {
+            const payload = JSON.parse(body || "{}");
+            const creators = Array.isArray(payload.creators) ? payload.creators : [];
+            const backupDir = path.resolve(process.cwd(), "output", "creator-backups");
+            const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+            const backupPayload = {
+              savedAt: new Date().toISOString(),
+              count: creators.length,
+              source: payload.source || "creator-workbench",
+              creators,
+            };
+
+            await fs.mkdir(backupDir, { recursive: true });
+            await fs.writeFile(
+              path.join(backupDir, `creators-${creators.length}-${timestamp}.json`),
+              JSON.stringify(backupPayload, null, 2),
+            );
+            await fs.writeFile(path.join(backupDir, "latest.json"), JSON.stringify(backupPayload, null, 2));
+
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: true, count: creators.length }));
+          } catch (error) {
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: false, message: error instanceof Error ? error.message : "backup failed" }));
+          }
+        });
+      });
+    },
+  };
+}
+
+function sendJson(res, statusCode, payload) {
+  res.writeHead(statusCode, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(payload));
+}
+
+function readRequestBody(req, limitBytes = 5 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > limitBytes) {
+        reject(new Error("Request body is too large"));
+        req.destroy();
+      }
+    });
+    req.on("end", () => resolve(body));
+    req.on("error", reject);
+  });
+}
+
+function postJson(targetUrl, payload) {
+  return new Promise((resolve, reject) => {
+    const parsedUrl = new URL(targetUrl);
+    const body = JSON.stringify(payload);
+    const client = parsedUrl.protocol === "https:" ? https : http;
+    const request = client.request(
+      parsedUrl,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body),
+        },
+      },
+      (response) => {
+        let responseBody = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => {
+          responseBody += chunk;
+        });
+        response.on("end", () => {
+          let parsedBody = {};
+          try {
+            parsedBody = responseBody ? JSON.parse(responseBody) : {};
+          } catch {
+            parsedBody = { message: responseBody };
+          }
+
+          if (response.statusCode >= 400) {
+            reject(new Error(parsedBody.message || `n8n webhook failed: ${response.statusCode}`));
+            return;
+          }
+
+          resolve(parsedBody);
+        });
+      },
+    );
+
+    request.on("error", reject);
+    request.write(body);
+    request.end();
+  });
+}
+
+function compactCreatorContact(contact = {}) {
+  return Object.fromEntries(
+    Object.entries({
+      email: contact.email,
+      instagram: contact.instagram,
+      socialAccount: contact.socialAccount,
+      notes: contact.notes,
+    }).filter(([, value]) => value),
+  );
+}
+
+function createLocalCreatorDraft(creator) {
+  const name = creator.displayName || creator.handle || "there";
+  const handle = String(creator.handle || "").replace(/^@/, "");
+  const keywords = Array.isArray(creator.matchedKeywords) ? creator.matchedKeywords.slice(0, 4) : [];
+  const nicheLine = keywords.length
+    ? `Your content fits our ${keywords.join(" / ")} creator list.`
+    : "Your beauty and hair content fits our creator list.";
+  const profileLine = handle ? `I found your TikTok @${handle}` : "I found your TikTok profile";
+
+  return [
+    `Hi ${name},`,
+    "",
+    `${profileLine} and liked the way your hair content connects with your audience. ${nicheLine}`,
+    "",
+    "We are preparing a first collaboration wave for drawstring ponytail, half wig, crochet hair, and braids products. The starting offer is free product + paid collaboration + commission, with TikTok Shop videos as the main deliverable.",
+    "",
+    "Would you be open to reviewing the details if the product style matches your audience?",
+    "",
+    "Best regards",
+    "TK-SaaS Creator Team",
+  ].join("\n");
+}
+
+async function readAutomationQueue(queueFile) {
+  try {
+    const parsed = JSON.parse(await fs.readFile(queueFile, "utf8"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function writeAutomationQueue(automationDir, queue) {
+  await fs.mkdir(automationDir, { recursive: true });
+  await fs.writeFile(path.join(automationDir, "queue.json"), JSON.stringify(queue, null, 2));
+  await fs.writeFile(
+    path.join(automationDir, "latest.json"),
+    JSON.stringify(
+      {
+        savedAt: new Date().toISOString(),
+        count: queue.length,
+        entries: queue,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+function creatorAutomationPlugin() {
+  return {
+    name: "creator-automation",
+    configureServer(server) {
+      server.middlewares.use("/api/local/creator-automation", async (req, res) => {
+        const automationDir = path.resolve(process.cwd(), "output", "creator-automation");
+        const queueFile = path.join(automationDir, "queue.json");
+
+        if (req.method === "GET") {
+          try {
+            const queue = await readAutomationQueue(queueFile);
+            sendJson(res, 200, { ok: true, count: queue.length, entries: queue });
+          } catch (error) {
+            sendJson(res, 500, {
+              ok: false,
+              message: error instanceof Error ? error.message : "read queue failed",
+            });
+          }
+          return;
+        }
+
+        if (req.method !== "POST") {
+          sendJson(res, 405, { ok: false, message: "Method not allowed" });
+          return;
+        }
+
+        try {
+          const payload = JSON.parse((await readRequestBody(req)) || "{}");
+          const creator = payload.creator ?? {};
+
+          if (!creator.id) {
+            sendJson(res, 400, { ok: false, message: "creator.id is required" });
+            return;
+          }
+
+          if (payload.action === "send" || payload.allowSend === true || payload.dryRun === false) {
+            sendJson(res, 409, {
+              ok: false,
+              status: "blocked",
+              allowSend: false,
+              dryRun: true,
+              message: "Automatic outreach sending is disabled. Generate a draft first.",
+            });
+            return;
+          }
+
+          const now = new Date().toISOString();
+          const queueId = `creator-outreach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          const queue = await readAutomationQueue(queueFile);
+          const entry = {
+            id: queueId,
+            requestedAt: payload.requestedAt || now,
+            updatedAt: now,
+            action: "draft",
+            status: "queued",
+            dryRun: true,
+            allowSend: false,
+            creatorId: creator.id,
+            creatorName: creator.displayName,
+            creatorHandle: creator.handle,
+            profileUrl: creator.profileUrl,
+            contact: compactCreatorContact(creator.contact),
+            metrics: creator.metrics,
+            matchedKeywords: creator.matchedKeywords ?? [],
+            evidence: creator.evidence,
+            payload: {
+              ...payload,
+              dryRun: true,
+              allowSend: false,
+            },
+          };
+
+          queue.push(entry);
+          await writeAutomationQueue(automationDir, queue);
+
+          const n8nWebhookUrl = process.env.N8N_CREATOR_OUTREACH_WEBHOOK_URL;
+          let result;
+
+          if (n8nWebhookUrl) {
+            const n8nResult = await postJson(n8nWebhookUrl, {
+              ...payload,
+              queueId,
+              dryRun: true,
+              allowSend: false,
+            });
+            const draft =
+              n8nResult.draft ||
+              n8nResult.message ||
+              n8nResult.text ||
+              n8nResult?.choices?.[0]?.message?.content ||
+              "";
+
+            result = {
+              ok: true,
+              queueId,
+              status: draft ? "draft_ready" : "queued",
+              source: "n8n-webhook",
+              draft,
+              dryRun: true,
+              allowSend: false,
+              updatedAt: new Date().toISOString(),
+              n8nConfigured: true,
+            };
+          } else {
+            result = {
+              ok: true,
+              queueId,
+              status: "draft_ready",
+              source: "local-dry-run",
+              draft: createLocalCreatorDraft(creator),
+              dryRun: true,
+              allowSend: false,
+              updatedAt: new Date().toISOString(),
+              n8nConfigured: false,
+            };
+          }
+
+          const updatedQueue = queue.map((queueEntry) =>
+            queueEntry.id === queueId
+              ? {
+                  ...queueEntry,
+                  status: result.status,
+                  updatedAt: result.updatedAt,
+                  source: result.source,
+                  draft: result.draft,
+                  n8nConfigured: result.n8nConfigured,
+                }
+              : queueEntry,
+          );
+
+          await writeAutomationQueue(automationDir, updatedQueue);
+          sendJson(res, 200, result);
+        } catch (error) {
+          sendJson(res, 500, {
+            ok: false,
+            status: "failed",
+            message: error instanceof Error ? error.message : "creator automation failed",
+            dryRun: true,
+            allowSend: false,
+          });
+        }
+      });
+    },
+  };
+}
+
 export default defineConfig({
   optimizeDeps: {
     include: ["react", "react-dom/client"],
@@ -61,5 +388,5 @@ export default defineConfig({
       },
     },
   },
-  plugins: [react(), echotikCdnProxy()],
+  plugins: [react(), echotikCdnProxy(), creatorBackupPlugin(), creatorAutomationPlugin()],
 });

@@ -50,6 +50,45 @@ function cleanHandle(value) {
   return handle.replace(/^@/, "").trim();
 }
 
+function buildTikTokVideoUrl(handle, videoId) {
+  const cleanVideoId = String(videoId ?? "").trim();
+  const cleanTikTokHandle = cleanHandle(handle);
+
+  if (!cleanVideoId || !cleanTikTokHandle) {
+    return "";
+  }
+
+  return `https://www.tiktok.com/@${cleanTikTokHandle}/video/${cleanVideoId}`;
+}
+
+function cleanVideoUrl(value) {
+  const url = String(value ?? "").trim();
+
+  if (!url || isMissingValue(url)) {
+    return "";
+  }
+
+  return /^https?:\/\//i.test(url) ? url : "";
+}
+
+function parseBooleanFlag(value) {
+  if (isMissingValue(value)) {
+    return false;
+  }
+
+  return ["1", "true", "yes", "是", "有"].includes(String(value).trim().toLowerCase());
+}
+
+function formatUnixDate(value) {
+  const timestamp = Number(value);
+
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return "";
+  }
+
+  return new Date(timestamp * 1000).toISOString().split("T")[0];
+}
+
 function parseNumber(value) {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
@@ -207,7 +246,48 @@ function getRowText(row) {
     .join(" ");
 }
 
-function extractRecentVideos(row, id) {
+function extractRecentVideos(row, id, handle = "") {
+  const nestedVideos = Array.isArray(row.videos)
+    ? row.videos
+    : Array.isArray(row.recentVideos)
+      ? row.recentVideos
+      : [];
+
+  if (nestedVideos.length > 0) {
+    return nestedVideos
+      .map((video, index) => {
+        const videoId = String(
+          getField(video, ["video_id", "videoId", "id", "视频ID"]) || `${id}-video-${index + 1}`,
+        ).trim();
+        const uniqueId = cleanHandle(getField(video, ["unique_id", "uniqueId", "TikTok ID"]) || handle);
+        const videoUrl = cleanVideoUrl(getField(video, ["videoUrl", "video_url", "shareUrl", "share_url", "url"]));
+
+        return {
+          id: videoId,
+          videoId,
+          uniqueId,
+          videoUrl: videoUrl || buildTikTokVideoUrl(uniqueId, videoId),
+          shareUrl: videoUrl,
+          title: String(getField(video, ["title", "video_desc", "description", "caption", "视频标题"]) || "").trim(),
+          description: String(getField(video, ["description", "video_desc", "title", "caption", "视频描述"]) || "").trim(),
+          views: parseNumber(getField(video, ["views", "total_views_cnt", "totalViewsCnt", "视频播放量"])) ?? 0,
+          createDate:
+            String(getField(video, ["createDate", "publishedAt", "date", "video date"]) || "").trim() ||
+            formatUnixDate(getField(video, ["create_time", "createTime"])),
+          coverUrl: String(getField(video, ["coverUrl", "cover_url", "reflow_cover", "thumbnail", "thumb"]) || "").trim(),
+          hasProducts: parseBooleanFlag(getField(video, ["hasProducts", "sales_flag", "is_ad"])),
+          productIds: Array.isArray(video.productIds)
+            ? video.productIds
+            : Array.isArray(video.video_products)
+              ? video.video_products
+              : [],
+          salesCount: parseNumber(getField(video, ["salesCount", "total_video_sale_cnt"])) ?? 0,
+          salesGmv: parseNumber(getField(video, ["salesGmv", "total_video_sale_gmv_amt"])) ?? 0,
+        };
+      })
+      .filter((video) => video.videoId || video.videoUrl || video.coverUrl || Number(video.views ?? 0) > 0);
+  }
+
   const videoMap = new Map();
 
   Object.entries(row).forEach(([key, value]) => {
@@ -216,16 +296,20 @@ function extractRecentVideos(row, id) {
     }
 
     const normalizedKey = normalizeHeader(key);
-    const viewsMatch = normalizedKey.match(/video(\d+).*view/);
-    const dateMatch = normalizedKey.match(/video(\d+).*(date|create|publish|time)/);
-    const coverMatch = normalizedKey.match(/video(\d+).*(cover|thumb|image)/);
-    const match = viewsMatch ?? dateMatch ?? coverMatch;
+    const viewsMatch = normalizedKey.match(/video(\d+).*view|视频(\d+).*播放/);
+    const dateMatch = normalizedKey.match(/video(\d+).*(date|create|publish|time)|视频(\d+).*(日期|时间|发布)/);
+    const coverMatch = normalizedKey.match(/video(\d+).*(cover|thumb|image)|视频(\d+).*(封面|图片)/);
+    const urlMatch = normalizedKey.match(/video(\d+).*(url|link|share)|视频(\d+).*(链接|地址)/);
+    const idMatch = normalizedKey.match(/video(\d+).*id|视频(\d+).*id/);
+    const titleMatch = normalizedKey.match(/video(\d+).*(title|desc|caption)|视频(\d+).*(标题|描述|文案)/);
+    const productMatch = normalizedKey.match(/video(\d+).*(product|salesflag|带货|商品)/);
+    const match = viewsMatch ?? dateMatch ?? coverMatch ?? urlMatch ?? idMatch ?? titleMatch ?? productMatch;
 
     if (!match) {
       return;
     }
 
-    const videoIndex = Number(match[1]);
+    const videoIndex = Number(match[1] ?? match[2]);
     const currentVideo = videoMap.get(videoIndex) ?? {
       id: `${id}-video-${videoIndex}`,
     };
@@ -242,44 +326,77 @@ function extractRecentVideos(row, id) {
       currentVideo.coverUrl = String(value).trim();
     }
 
+    if (urlMatch) {
+      currentVideo.videoUrl = cleanVideoUrl(value);
+      currentVideo.shareUrl = currentVideo.videoUrl;
+    }
+
+    if (idMatch) {
+      currentVideo.videoId = String(value).trim();
+      currentVideo.id = currentVideo.videoId || currentVideo.id;
+    }
+
+    if (titleMatch) {
+      currentVideo.title = String(value).trim();
+      currentVideo.description = currentVideo.title;
+    }
+
+    if (productMatch) {
+      currentVideo.hasProducts = parseBooleanFlag(value);
+      currentVideo.salesCount = parseNumber(value) ?? currentVideo.salesCount;
+    }
+
+    if (!currentVideo.videoUrl && currentVideo.videoId) {
+      currentVideo.videoUrl = buildTikTokVideoUrl(handle, currentVideo.videoId);
+    }
+
     videoMap.set(videoIndex, currentVideo);
   });
 
   const indexedVideos = [...videoMap.entries()]
     .sort(([leftIndex], [rightIndex]) => leftIndex - rightIndex)
     .map(([, video]) => video)
-    .filter((video) => Number(video.views ?? 0) > 0 || video.createDate || video.coverUrl);
+    .filter(
+      (video) =>
+        Number(video.views ?? 0) > 0 ||
+        video.createDate ||
+        video.coverUrl ||
+        video.videoUrl ||
+        video.videoId ||
+        video.title,
+    );
 
   if (indexedVideos.length > 0) {
     return indexedVideos;
   }
 
-  const averageViews = parseNumber(
-    getField(row, [
-      "views_per_video_30d",
-      "views_per_video",
-      "Avg. views per video",
-      "average views per video",
-      "avg_views_per_video",
-      "Views",
-      "平均播放量(近30天)",
-      "近30天播放量",
-      "近 30 天 播放量",
-    ]),
+  const singleVideoId = String(getField(row, ["video_id", "video id", "视频ID"]) || "").trim();
+  const singleVideoUrl = cleanVideoUrl(
+    getField(row, ["video_url", "video url", "share_url", "share url", "视频链接", "视频地址"]),
   );
+  const singleCoverUrl = String(
+    getField(row, ["cover_url", "cover", "video cover", "thumbnail", "thumb", "视频封面"]) || "",
+  ).trim();
+  const singleViews = parseNumber(getField(row, ["video_views", "video views", "视频播放量"]));
 
-  return averageViews
+  return singleVideoId || singleVideoUrl
     ? [
         {
-          id: `${id}-video-1`,
-          views: averageViews,
+          id: singleVideoId || `${id}-video-1`,
+          videoId: singleVideoId,
+          videoUrl: singleVideoUrl || buildTikTokVideoUrl(handle, singleVideoId),
+          shareUrl: singleVideoUrl || "",
+          title: String(getField(row, ["video_desc", "video title", "video description", "视频标题", "视频描述"]) || "").trim(),
+          views: singleViews ?? 0,
+          createDate: String(getField(row, ["video_create_date", "video date", "视频发布时间"]) || "").trim(),
+          coverUrl: singleCoverUrl,
         },
       ]
     : [];
 }
 
 function buildProductEvidence(id, productCount) {
-  return Array.from({ length: Math.min(productCount, 12) }, (_, index) => `${id}-product-${index + 1}`);
+  return [];
 }
 
 function sanitizeId(value, fallback) {
@@ -360,7 +477,7 @@ export function normalizeEchoTikCreatorRows(rows, options = {}) {
         getField(row, ["点赞数/粉丝数", "获赞数/粉丝数", "likes_follower_ratio", "digg_follower_ratio"]),
       );
       const totalVideoCount = parseNumber(
-        getField(row, ["视频数", "total_video_cnt", "video_count", "videos"]),
+        getField(row, ["视频数", "total_video_cnt", "total_post_video_cnt", "video_count", "videos"]),
       );
       const productCount = parseNumber(
         getField(row, [
@@ -373,19 +490,29 @@ export function normalizeEchoTikCreatorRows(rows, options = {}) {
           "商品数",
         ]),
       );
-      const recentVideos = extractRecentVideos(row, safeId);
+      const recentVideos = extractRecentVideos(row, safeId, handle);
       const profileUrl =
         String(getField(row, ["profile_url", "profile url", "TikTok profile", "tiktok profile"]) || "").trim() ||
         (handle ? `https://www.tiktok.com/@${handle}` : "");
-      const bio = String(getField(row, ["bio", "description", "profile", "creator bio"]) || "").trim();
+      const bio = String(getField(row, ["bio", "signature", "description", "profile", "creator bio"]) || "").trim();
       const avatarUrl = String(getField(row, ["avatar_url", "avatar", "Avatar", "avatar url"]) || "").trim();
       const highPerformingCoverUrl =
         recentVideos.find((video) => video.coverUrl)?.coverUrl ||
-        String(getField(row, ["cover_url", "cover", "video cover", "thumbnail", "thumb"]) || "").trim() ||
-        avatarUrl;
+        String(
+          getField(row, [
+            "high_performing_cover_url",
+            "high performing cover",
+            "top video cover",
+            "highest video cover",
+            "最高播放视频封面",
+            "高播放视频封面",
+            "video cover",
+          ]) || "",
+        ).trim();
       const email = parseEmail(
         [
           getField(row, ["email", "Email", "contact", "contact_way", "contact way", "联系邮箱"]),
+          getField(row, ["contact_email", "contact email"]),
           bio,
           rowText,
         ].join(" "),
@@ -401,7 +528,18 @@ export function normalizeEchoTikCreatorRows(rows, options = {}) {
       const liveSalesGmv = parseNumber(getField(row, ["直播销售额($)", "直播销售额", "live_sales_gmv"]));
       const er = parseNumber(getField(row, ["ER互动率", "互动率", "interaction_rate", "engagement_rate", "ER"]));
       const avgViews30d = parseNumber(
-        getField(row, ["平均播放量(近30天)", "近30天播放量", "近 30 天 播放量", "avg_views_30d", "avg views 30d"]),
+        getField(row, [
+          "平均播放量(近30天)",
+          "近30天播放量",
+          "近 30 天 播放量",
+          "views_per_video_30d",
+          "views_per_video",
+          "Avg. views per video",
+          "average views per video",
+          "avg_views_per_video",
+          "avg_views_30d",
+          "avg views 30d",
+        ]),
       );
       const socialAccount = String(getField(row, ["社交账号", "social_account", "social", "socials"]) || "").trim();
       const sourceDataWarnings = [];
@@ -411,7 +549,7 @@ export function normalizeEchoTikCreatorRows(rows, options = {}) {
       }
 
       if (recentVideos.length === 0) {
-        sourceDataWarnings.push("播放字段缺失");
+        sourceDataWarnings.push("视频明细缺失");
       }
 
       if (productCount === null) {
@@ -431,6 +569,7 @@ export function normalizeEchoTikCreatorRows(rows, options = {}) {
           bio || category || "EchoTik 导入达人，等待补充视频封面、近期播放和联系方式。",
         recommendedProducts: [],
         matchedKeywords: inferMatchedKeywords(row, keywords),
+        avatarUrl,
         highPerformingCoverUrl,
         productAssociatedVideos: buildProductEvidence(safeId, productCount ?? 0),
         contact: {

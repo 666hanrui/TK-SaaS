@@ -8,6 +8,9 @@
  *
  *   2. Then run queries with saved state:
  *      node scripts/fetch-echotik-web.mjs --gender female --contact email --pages 3
+ *
+ *   3. Include real creator video details when the account can access them:
+ *      node scripts/fetch-echotik-web.mjs --keyword braids --include-videos --max-video-creators 30
  */
 import { chromium } from "playwright";
 import fs from "fs/promises";
@@ -31,8 +34,11 @@ function parseArgs() {
     productCategories: "",
     order: "follower_30d_count",
     sort: "desc",
+    keyword: "",
     pages: 1,
     perPage: 50,
+    includeVideos: false,
+    maxVideoCreators: 30,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -82,6 +88,10 @@ function parseArgs() {
         options.sort = value;
         i++;
         break;
+      case "--keyword":
+        options.keyword = value;
+        i++;
+        break;
       case "--pages":
         options.pages = Number(value) || 1;
         i++;
@@ -90,10 +100,34 @@ function parseArgs() {
         options.perPage = Number(value) || 50;
         i++;
         break;
+      case "--include-videos":
+        options.includeVideos = true;
+        break;
+      case "--max-video-creators":
+        options.maxVideoCreators = Number(value) || 30;
+        i++;
+        break;
     }
   }
 
   return options;
+}
+
+async function fetchJsonWithBrowser(page, url) {
+  return page.evaluate(async (fetchUrl) => {
+    const res = await fetch(fetchUrl, {
+      headers: {
+        accept: "application/json, text/plain, */*",
+        "content-type": "application/json",
+        "x-region": "US",
+        "x-lang": "zh-CN",
+        "x-currency": "USD",
+        "x-secondary-currency": "CNY",
+      },
+      credentials: "include",
+    });
+    return res.json();
+  }, url);
 }
 
 async function login() {
@@ -137,6 +171,7 @@ async function fetchList(options) {
   params.set("order", options.order);
   params.set("sort", options.sort);
 
+  if (options.keyword) params.set("keyword", options.keyword);
   if (options.gender) params.set("gender", options.gender);
   if (options.contact) params.set("contact", options.contact);
   if (options.followerGenders) params.set("follower_genders", options.followerGenders);
@@ -150,20 +185,7 @@ async function fetchList(options) {
     const url = `https://echotik.live/api/v1/data/influencers?${params.toString()}`;
 
     console.log(`Fetching page ${pageNum}: ${url}`);
-    const response = await page.evaluate(async (fetchUrl) => {
-      const res = await fetch(fetchUrl, {
-        headers: {
-          accept: "application/json, text/plain, */*",
-          "content-type": "application/json",
-          "x-region": "US",
-          "x-lang": "zh-CN",
-          "x-currency": "USD",
-          "x-secondary-currency": "CNY",
-        },
-        credentials: "include",
-      });
-      return res.json();
-    }, url);
+    const response = await fetchJsonWithBrowser(page, url);
 
     if (!response.data || !Array.isArray(response.data) || response.data.length === 0) {
       console.log("No more data.");
@@ -178,9 +200,46 @@ async function fetchList(options) {
     }
   }
 
+  if (options.includeVideos) {
+    const targets = allResults.slice(0, options.maxVideoCreators);
+    console.log(`\nFetching videos for ${targets.length} influencers...`);
+
+    for (let index = 0; index < targets.length; index += 1) {
+      const influencer = targets[index];
+      const influencerId = influencer.influencer_id || influencer.user_id || influencer.id;
+
+      if (!influencerId) {
+        influencer.videos = [];
+        influencer.video_fetch_status = "missing influencer id";
+        continue;
+      }
+
+      const videoUrl = `https://echotik.live/api/v1/data/influencers/${influencerId}/videos?page=1&per_page=10`;
+
+      try {
+        const response = await fetchJsonWithBrowser(page, videoUrl);
+        const videos = Array.isArray(response.data)
+          ? response.data
+          : Array.isArray(response.data?.data)
+            ? response.data.data
+            : [];
+
+        influencer.videos = videos;
+        influencer.video_fetch_status = response.code === 0 ? "ok" : response.msg || response.message || "not ok";
+        console.log(`  [${index + 1}/${targets.length}] ${influencer.unique_id || influencerId}: ${videos.length} videos`);
+      } catch (error) {
+        influencer.videos = [];
+        influencer.video_fetch_status = error instanceof Error ? error.message : "video fetch failed";
+        console.log(`  [${index + 1}/${targets.length}] ${influencer.unique_id || influencerId}: failed`);
+      }
+
+      await page.waitForTimeout(1200 + Math.random() * 800);
+    }
+  }
+
   const outputPath = path.join(
     OUTPUT_DIR,
-    `echotik-web-${options.gender || "all"}-${Date.now()}.json`,
+    `echotik-web-${options.keyword || options.gender || "all"}-${Date.now()}.json`,
   );
   await fs.writeFile(outputPath, JSON.stringify(allResults, null, 2));
 

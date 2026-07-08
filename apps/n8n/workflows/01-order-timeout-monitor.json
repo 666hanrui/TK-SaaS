@@ -1,9 +1,9 @@
 {
-  "name": "订单超时监控 - Order Timeout Monitor",
+  "name": "\u8ba2\u5355\u8d85\u65f6\u76d1\u63a7 - Order Timeout Monitor",
   "nodes": [
     {
       "id": "7fabe71e-543c-4005-8f4e-3b5a834a746d",
-      "name": "每1小时触发",
+      "name": "\u6bcf1\u5c0f\u65f6\u89e6\u53d1",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1,
       "position": [
@@ -23,7 +23,7 @@
     },
     {
       "id": "d9c482b2-13fa-4218-8fdb-237f54a869da",
-      "name": "获取待处理订单",
+      "name": "\u83b7\u53d6\u5f85\u5904\u7406\u8ba2\u5355",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 3,
       "position": [
@@ -41,7 +41,7 @@
     },
     {
       "id": "4408fb5b-7d0b-4b03-90b5-d59faa76d76d",
-      "name": "计算揽收风险",
+      "name": "\u8ba1\u7b97\u63fd\u6536\u98ce\u9669",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -50,12 +50,12 @@
       ],
       "parameters": {
         "language": "python",
-        "code": "# 输入: items 包含订单列表\n# 每个订单有: paid_at, order_status, pickup_deadline\n\nimport datetime\n\nnow = datetime.datetime.now(datetime.timezone.utc)\n\nrisk_orders = []\nfor order in items:\n    deadline_str = order.get('pickup_deadline')\n    if not deadline_str:\n        continue\n    try:\n        deadline = datetime.datetime.fromisoformat(deadline_str.replace('Z', '+00:00'))\n    except:\n        continue\n    \n    remaining_hours = (deadline - now).total_seconds() / 3600\n    \n    if remaining_hours < 0:\n        risk = 'overdue'\n    elif remaining_hours <= 1:\n        risk = 'urgent'\n    elif remaining_hours <= 4:\n        risk = 'warning'\n    elif remaining_hours <= 8:\n        risk = 'normal'\n    else:\n        continue  # 安全区间，跳过\n    \n    risk_orders.append({\n        'order_id': order.get('platform_order_id'),\n        'deadline': deadline_str,\n        'remaining_hours': round(remaining_hours, 1),\n        'risk_level': risk,\n        'status': order.get('order_status'),\n    })\n\n# 按风险排序\nrisk_orders.sort(key=lambda x: x['remaining_hours'])\n\nreturn risk_orders"
+        "code": "# \u8f93\u5165: items \u5305\u542b\u8ba2\u5355\u5217\u8868\n# \u6bcf\u4e2a\u8ba2\u5355\u6709: paid_at, order_status, pickup_deadline\n\nimport datetime\n\nnow = datetime.datetime.now(datetime.timezone.utc)\n\nrisk_orders = []\nfor order in items:\n    deadline_str = order.get('pickup_deadline')\n    if not deadline_str:\n        continue\n    try:\n        deadline = datetime.datetime.fromisoformat(deadline_str.replace('Z', '+00:00'))\n    except:\n        continue\n    \n    remaining_hours = (deadline - now).total_seconds() / 3600\n    \n    if remaining_hours < 0:\n        risk = 'overdue'\n    elif remaining_hours <= 1:\n        risk = 'urgent'\n    elif remaining_hours <= 4:\n        risk = 'warning'\n    elif remaining_hours <= 8:\n        risk = 'normal'\n    else:\n        continue  # \u5b89\u5168\u533a\u95f4\uff0c\u8df3\u8fc7\n    \n    risk_orders.append({\n        'order_id': order.get('platform_order_id'),\n        'deadline': deadline_str,\n        'remaining_hours': round(remaining_hours, 1),\n        'risk_level': risk,\n        'status': order.get('order_status'),\n    })\n\n# \u6309\u98ce\u9669\u6392\u5e8f\nrisk_orders.sort(key=lambda x: x['remaining_hours'])\n\nreturn risk_orders"
       }
     },
     {
       "id": "634e75ab-c3a5-4d7f-83e4-d84128a0cb10",
-      "name": "更新任务到 TK-SaaS",
+      "name": "\u66f4\u65b0\u4efb\u52a1\u5230 TK-SaaS",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 3,
       "position": [
@@ -83,7 +83,7 @@
     },
     {
       "id": "bb8a6695-8811-4b69-8980-52a867f36030",
-      "name": "有风险订单？",
+      "name": "\u6709\u98ce\u9669\u8ba2\u5355\uff1f",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
       "position": [
@@ -94,7 +94,7 @@
         "conditions": {
           "number": [
             {
-              "value1": "={{ $items(\"计算揽收风险\").length }}",
+              "value1": "={{ $items(\"\u8ba1\u7b97\u63fd\u6536\u98ce\u9669\").length }}",
               "operation": "larger",
               "value2": 0
             }
@@ -104,7 +104,7 @@
     },
     {
       "id": "477b1245-e4df-410f-8f82-02e1748bc991",
-      "name": "紧急风险通知",
+      "name": "\u7d27\u6025\u98ce\u9669\u901a\u77e5",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
@@ -115,62 +115,62 @@
     }
   ],
   "connections": {
-    "每1小时触发": {
+    "\u6bcf1\u5c0f\u65f6\u89e6\u53d1": {
       "main": [
         [
           {
-            "node": "获取待处理订单",
+            "node": "\u83b7\u53d6\u5f85\u5904\u7406\u8ba2\u5355",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "获取待处理订单": {
+    "\u83b7\u53d6\u5f85\u5904\u7406\u8ba2\u5355": {
       "main": [
         [
           {
-            "node": "计算揽收风险",
+            "node": "\u8ba1\u7b97\u63fd\u6536\u98ce\u9669",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "计算揽收风险": {
+    "\u8ba1\u7b97\u63fd\u6536\u98ce\u9669": {
       "main": [
         [
           {
-            "node": "更新任务到 TK-SaaS",
+            "node": "\u66f4\u65b0\u4efb\u52a1\u5230 TK-SaaS",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "有风险订单？",
+            "node": "\u6709\u98ce\u9669\u8ba2\u5355\uff1f",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "更新任务到 TK-SaaS": {
+    "\u66f4\u65b0\u4efb\u52a1\u5230 TK-SaaS": {
       "main": [
         [
           {
-            "node": "有风险订单？",
+            "node": "\u6709\u98ce\u9669\u8ba2\u5355\uff1f",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "有风险订单？": {
+    "\u6709\u98ce\u9669\u8ba2\u5355\uff1f": {
       "main": [
         [
           {
-            "node": "紧急风险通知",
+            "node": "\u7d27\u6025\u98ce\u9669\u901a\u77e5",
             "type": "main",
             "index": 0
           }
@@ -181,7 +181,5 @@
   },
   "settings": {},
   "staticData": null,
-  "tags": [],
-  "id": "c54ffbd8-22f0-452a-9a29-9de0f9ff029f",
-  "versionId": "6f3a51c5-b570-4139-9c1b-44814e88970d"
+  "active": false
 }

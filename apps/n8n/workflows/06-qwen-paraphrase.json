@@ -1,0 +1,198 @@
+{
+  "name": "\u5ba2\u670d\u8bdd\u672f\u53d8\u4f53\u751f\u6210 - Qwen Paraphrase",
+  "nodes": [
+    {
+      "id": "webhook-entry",
+      "name": "Webhook \u5165\u53e3",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ],
+      "webhookId": "paraphrase",
+      "parameters": {
+        "path": "paraphrase",
+        "options": {}
+      }
+    },
+    {
+      "id": "set-vars",
+      "name": "\u8bbe\u7f6e\u53d8\u91cf",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ],
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "template",
+              "value": "={{ $json.body.template || $json.template }}"
+            },
+            {
+              "name": "customerName",
+              "value": "={{ $json.body.customerName || $json.customerName || $json.body.name || $json.name }}"
+            },
+            {
+              "name": "channel",
+              "value": "={{ $json.body.channel || $json.channel || 'whatsapp' }}"
+            },
+            {
+              "name": "scenario",
+              "value": "={{ $json.body.scenario || $json.scenario || 'general' }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "http-llm",
+      "name": "Qwen Paraphrase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        650,
+        300
+      ],
+      "parameters": {
+        "url": "http://192.168.9.111:8080/v1/chat/completions",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "default"
+            },
+            {
+              "name": "max_tokens",
+              "value": 500
+            },
+            {
+              "name": "temperature",
+              "value": 0.8
+            },
+            {
+              "name": "messages",
+              "value": [
+                {
+                  "role": "system",
+                  "content": "\u4f60\u662f\u4e00\u4e2a\u8de8\u5883\u7535\u5546\u5ba2\u670d\u3002\u4f60\u7684\u4efb\u52a1\u662f\u6839\u636e\u63d0\u4f9b\u7684\u6a21\u677f\uff0c\u751f\u62101\u6761\u81ea\u7136\u7684\u5ba2\u670d\u56de\u590d\u3002\u8981\u6c42\uff1a\n1. \u4fdd\u7559\u6838\u5fc3\u610f\u601d\uff08\u9053\u6b49\u3001\u89e3\u51b3\u65b9\u6848\u3001\u8865\u507f\u65b9\u6848\uff09\n2. \u6539\u53d8\u81f3\u5c1140%\u7684\u63aa\u8f9e\uff0c\u907f\u514d\u8ddf\u6a21\u677f\u4e00\u6a21\u4e00\u6837\n3. \u6839\u636e\u6e20\u9053\u8c03\u6574\u8bed\u6c14\uff08WhatsApp\u504f\u53e3\u8bed/\u7b80\u77ed\uff0cEmail\u504f\u6b63\u5f0f\uff09\n4. \u81ea\u7136\u5730\u63d2\u5165\u5ba2\u6237\u59d3\u540d\n5. \u4e0d\u8981\u4f7f\u7528emoji\u8868\u60c5\u7b26\u53f7\n6. \u8f93\u51fa\u4e0d\u8981\u8d85\u8fc7100\u4e2a\u5355\u8bcd\n7. \u53ea\u8f93\u51fa\u6d88\u606f\u5185\u5bb9\u672c\u8eab\uff0c\u4e0d\u8981\u52a0\u4efb\u4f55\u89e3\u91ca"
+                },
+                {
+                  "role": "user",
+                  "content": "=\u6a21\u677f\uff1a{{ $json.body.template }}\n\u5ba2\u6237\u540d\uff1a{{ $json.body.customerName || 'Customer' }}\n\u573a\u666f\uff1a{{ $json.body.scenario || 'general' }}\n\u6e20\u9053\uff1a{{ $json.body.channel || 'whatsapp' }}"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "output-format",
+      "name": "\u683c\u5f0f\u5316\u8f93\u51fa",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        850,
+        300
+      ],
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "originalTemplate",
+              "value": "={{ $json.body.template }}"
+            },
+            {
+              "name": "paraphrasedMessage",
+              "value": "={{ $json.choices[0].message.content }}"
+            },
+            {
+              "name": "customerName",
+              "value": "={{ $json.body.customerName || 'Customer' }}"
+            },
+            {
+              "name": "channel",
+              "value": "={{ $json.body.channel || 'whatsapp' }}"
+            },
+            {
+              "name": "scenario",
+              "value": "={{ $json.body.scenario || 'general' }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "respond",
+      "name": "\u8fd4\u56de\u7ed3\u679c",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1050,
+        300
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  'success': true,\n  'original': $json.originalTemplate,\n  'paraphrased': $json.paraphrasedMessage,\n  'customer': $json.customerName,\n  'channel': $json.channel,\n  'scenario': $json.scenario\n} }}"
+      }
+    }
+  ],
+  "connections": {
+    "webhook-entry": {
+      "main": [
+        [
+          {
+            "node": "set-vars",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "set-vars": {
+      "main": [
+        [
+          {
+            "node": "http-llm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "http-llm": {
+      "main": [
+        [
+          {
+            "node": "output-format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "output-format": {
+      "main": [
+        [
+          {
+            "node": "respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {},
+  "active": false
+}

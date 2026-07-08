@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Archive,
@@ -10,9 +10,12 @@ import {
   Clock3,
   Copy,
   ExternalLink,
+  Eye,
   FileSpreadsheet,
+  Film,
   Filter,
   Headphones,
+  ImageOff,
   Home,
   Inbox,
   Mail,
@@ -21,6 +24,7 @@ import {
   Search,
   Send,
   Settings,
+  ShoppingBag,
   Sparkles,
   Star,
   Truck,
@@ -32,6 +36,7 @@ import {
   apiLanes,
   automationEvents,
   creatorFunnelStages,
+  creatorLeads as demoCreatorLeads,
   creatorSearchKeywords,
   storeOptions,
   tasks as initialTasks,
@@ -50,7 +55,12 @@ import {
   updateCreatorStatus,
 } from "./lib/operations";
 import { normalizeEchoTikCreatorRows, parseEchoTikCreatorImport } from "./lib/echotikImport";
-import { fetchInfluencerList, fetchInfluencerVideos, ECHOTIK_PAGE_SIZE, mapInfluencerToCreatorLead } from "./lib/echotikApi";
+import { fetchInfluencerList, fetchInfluencerVideos, mapInfluencerToCreatorLead } from "./lib/echotikApi";
+import {
+  applyCreatorAutomationResult,
+  buildCreatorAutomationPayload,
+} from "./lib/creatorAutomation";
+import realEchoTikCreatorLeads from "./lib/echotikRealSeed.json";
 
 const navIconMap = {
   dashboard: Home,
@@ -101,7 +111,10 @@ const filterPriorities = [
   { value: "low", label: "低" },
 ];
 
-const creatorNow = new Date("2026-07-06T09:00:00+08:00");
+const creatorNow = new Date("2026-07-07T09:00:00+08:00");
+const creatorStorageKey = "tk-saas.creatorLeads.v1";
+const demoCreatorIds = new Set(demoCreatorLeads.map((creator) => creator.id));
+const realSeedCreatorIds = new Set(realEchoTikCreatorLeads.map((creator) => creator.id));
 
 const creatorStatusTone = {
   imported: "neutral",
@@ -115,16 +128,52 @@ const creatorStatusTone = {
   review: "neutral",
 };
 
+const creatorAutomationTone = {
+  queueing: "processing",
+  queued: "processing",
+  draft_ready: "done",
+  failed: "danger",
+  blocked: "warning",
+};
+
+function getCreatorAutomationLabel(status) {
+  return (
+    {
+      queueing: "提交中",
+      queued: "已入队",
+      draft_ready: "草稿就绪",
+      failed: "失败",
+      blocked: "已阻止",
+    }[status] ?? "未生成"
+  );
+}
+
 function formatMetricDelta(value, direction = "up") {
   return `${direction === "down" ? "↓" : "↑"} ${value}`;
 }
 
 function formatCompactNumber(value) {
-  if (value >= 10000) {
-    return `${(value / 10000).toFixed(value >= 100000 ? 0 : 1)}万`;
+  const number = typeof value === "number" ? value : Number(value);
+
+  if (!Number.isFinite(number)) {
+    return "--";
   }
 
-  return value.toLocaleString("en-US");
+  if (number >= 10000) {
+    return `${(number / 10000).toFixed(number >= 100000 ? 0 : 1)}万`;
+  }
+
+  return number.toLocaleString("en-US");
+}
+
+function formatDecimal(value, digits = 2) {
+  const number = typeof value === "number" ? value : Number(value);
+
+  if (!Number.isFinite(number)) {
+    return "--";
+  }
+
+  return number.toFixed(digits);
 }
 
 function formatCurrency(value) {
@@ -157,8 +206,111 @@ function getCreatorCover(creator) {
   return (
     creator.highPerformingCoverUrl ??
     creator.recentVideos?.find((video) => video.coverUrl)?.coverUrl ??
+    creator.avatarUrl ??
+    creator.avatar ??
     ""
   );
+}
+
+function buildTikTokVideoUrl(handle, videoId) {
+  const cleanHandle = String(handle ?? "").replace(/^@/, "").trim();
+  const cleanVideoId = String(videoId ?? "").trim();
+
+  if (!cleanHandle || !cleanVideoId) {
+    return "";
+  }
+
+  return `https://www.tiktok.com/@${cleanHandle}/video/${cleanVideoId}`;
+}
+
+function getVideoUrl(video, creator) {
+  return (
+    video?.videoUrl ||
+    video?.shareUrl ||
+    buildTikTokVideoUrl(video?.uniqueId || creator?.handle, video?.videoId || video?.id)
+  );
+}
+
+function formatShortDate(value) {
+  if (!value) return "缺发布时间";
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value);
+  }
+
+  return parsed.toISOString().split("T")[0];
+}
+
+function mapFetchedVideos(videos) {
+  return videos.map((video) => ({
+    id: video.id,
+    videoId: video.videoId || video.id,
+    title: video.title || video.description || "",
+    description: video.description || video.title || "",
+    views: video.views,
+    likes: video.likes,
+    comments: video.comments,
+    shares: video.shares,
+    createDate: video.createDate,
+    coverUrl: video.coverUrl,
+    videoUrl: video.videoUrl,
+    shareUrl: video.videoUrl,
+    hasProducts: video.hasProducts,
+    productIds: video.productIds,
+    salesCount: video.salesCount,
+    salesGmv: video.salesGmv,
+  }));
+}
+
+function mergeRealCreatorLeads(creators) {
+  const current = (Array.isArray(creators) ? creators : []).filter((creator) => !demoCreatorIds.has(creator.id));
+  const currentIds = new Set(current.map((creator) => creator.id));
+  const missingRealItems = realEchoTikCreatorLeads.filter((creator) => !currentIds.has(creator.id));
+
+  return missingRealItems.length > 0 ? [...missingRealItems, ...current] : current;
+}
+
+function loadSavedCreatorLeads() {
+  if (typeof window === "undefined") {
+    return realEchoTikCreatorLeads;
+  }
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(creatorStorageKey) || "[]");
+    if (!Array.isArray(parsed)) {
+      return realEchoTikCreatorLeads;
+    }
+
+    return mergeRealCreatorLeads(parsed);
+  } catch {
+    return realEchoTikCreatorLeads;
+  }
+}
+
+function rowsFromWorksheet(sheet, utils) {
+  const table = utils.sheet_to_json(sheet, { header: 1, defval: "" });
+  const headerIndex = table.findIndex((row) => {
+    const normalizedCells = row.map((cell) => String(cell).trim());
+    return normalizedCells.includes("User Id") && normalizedCells.includes("达人名称");
+  });
+
+  if (headerIndex < 0) {
+    return utils.sheet_to_json(sheet, { defval: "" });
+  }
+
+  const headers = table[headerIndex].map((header) => String(header).trim());
+
+  return table.slice(headerIndex + 1)
+    .filter((row) => row.some((cell) => String(cell ?? "").trim() !== ""))
+    .map((row) =>
+      headers.reduce((record, header, index) => {
+        if (header) {
+          record[header] = row[index] ?? "";
+        }
+        return record;
+      }, {}),
+    );
 }
 
 const blockedImageHosts = [
@@ -207,7 +359,7 @@ async function readCreatorImportFile(file) {
       return [];
     }
 
-    return normalizeEchoTikCreatorRows(utils.sheet_to_json(firstSheet, { defval: "" }), {
+    return normalizeEchoTikCreatorRows(rowsFromWorksheet(firstSheet, utils), {
       keywords: creatorSearchKeywords,
       sourceName: file.name,
     });
@@ -319,7 +471,7 @@ function Topbar({ activeSection, onOpenImport, onSyncEchoTik, isSyncing, lastSyn
       </div>
       <div className="topbar-actions">
         <button className="topbar-chip" type="button">
-          2026-07-06（周一）
+          2026-07-07（周二）
           <Clock3 size={15} />
         </button>
         {isCreatorPage ? (
@@ -343,7 +495,7 @@ function Topbar({ activeSection, onOpenImport, onSyncEchoTik, isSyncing, lastSyn
                 ? "同步中..."
                 : lastSync
                   ? `上次同步 ${lastSync}`
-                  : "点击从 EchoTik 同步"}
+                  : "EchoTik Open API 同步"}
               <RefreshCw size={15} className={isSyncing ? "spinning" : ""} />
             </button>
             <button className="primary-action" onClick={onOpenImport} type="button">
@@ -689,8 +841,10 @@ function CreatorTableRow({ creator, isSelected, onCopy, onSelect, onStar }) {
       <div className="creator-cell creator-cell-number creator-cell-highlight">
         {formatCompactNumber(creator.followerGrowth30d)}
       </div>
-      <div className="creator-cell creator-cell-number">{creator.likesFollowerRatio.toFixed(2)}</div>
-      <div className="creator-cell creator-cell-number">{formatCompactNumber(creator.totalVideoCount)}</div>
+      <div className="creator-cell creator-cell-number">{formatDecimal(creator.likesFollowerRatio)}</div>
+      <div className="creator-cell creator-cell-number">
+        {formatCompactNumber(creator.totalVideoCount || creator.recentVideos?.length || 0)}
+      </div>
       <div className="creator-cell creator-cell-number">{formatCompactNumber(creator.avgViews30d)}</div>
       <div className="creator-cell creator-cell-number">{formatPercent(creator.er)}</div>
       <div className="creator-cell creator-cell-number">{formatCompactNumber(creator.totalProductCnt || creator.productAssociatedVideos?.length || 0)}</div>
@@ -817,16 +971,24 @@ function CreatorPage({
           <div className="creator-cell creator-cell-action">操作</div>
         </div>
         <div className="creator-table-body">
-          {visibleCreators.map((creator) => (
-            <CreatorTableRow
-              creator={creator}
-              isSelected={creator.id === selectedCreatorId}
-              key={creator.id}
-              onCopy={onCopyHandle}
-              onSelect={onSelectCreator}
-              onStar={onStarToggle}
-            />
-          ))}
+          {visibleCreators.length > 0 ? (
+            visibleCreators.map((creator) => (
+              <CreatorTableRow
+                creator={creator}
+                isSelected={creator.id === selectedCreatorId}
+                key={creator.id}
+                onCopy={onCopyHandle}
+                onSelect={onSelectCreator}
+                onStar={onStarToggle}
+              />
+            ))
+          ) : (
+            <div className="creator-empty-state">
+              <Users size={24} />
+              <strong>还没有真实达人数据</strong>
+              <span>点击 EchoTik 同步，或导入 EchoTik CSV / Excel / JSON 后开始粗筛。</span>
+            </div>
+          )}
         </div>
       </section>
     </main>
@@ -848,7 +1010,7 @@ function DrawerCoverImage({ creator }) {
 
   return (
     <img
-      alt={`${creator.displayName} 高播放视频封面`}
+      alt={`${creator.displayName} 达人图片`}
       referrerPolicy="no-referrer"
       src={src}
       onError={() => setFailed(true)}
@@ -856,7 +1018,112 @@ function DrawerCoverImage({ creator }) {
   );
 }
 
-function CreatorDetailDrawer({ creator, onContactChange, onStatusChange }) {
+function VideoCoverImage({ video, creator }) {
+  const [failed, setFailed] = useState(false);
+  const src = video.coverUrl || creator.highPerformingCoverUrl || "";
+
+  if (!src || isBlockedImageUrl(src) || failed) {
+    return (
+      <div className="creator-video-cover-fallback">
+        <Film size={24} />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      alt={video.title || video.description || `${creator.displayName} video`}
+      referrerPolicy="no-referrer"
+      src={src}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+function CreatorVideoList({ creator }) {
+  const videos = (creator.recentVideos ?? []).filter(
+    (video) => video && (video.videoUrl || video.shareUrl || video.videoId || video.id || video.coverUrl || video.views),
+  );
+
+  if (creator.videoDetailsLoading) {
+    return (
+      <div className="creator-video-empty">
+        <RefreshCw size={18} className="spinning" />
+        正在从 EchoTik 拉取该达人的真实视频明细
+      </div>
+    );
+  }
+
+  if (videos.length === 0) {
+    return (
+      <div className="creator-video-empty">
+        <ImageOff size={18} />
+        {creator.rawId
+          ? "EchoTik 视频接口暂未返回该达人视频；仍保留真实达人资料，等待重试或导入视频导出文件。"
+          : "当前文件没有导入视频明细；需要 EchoTik 视频导出列或 Open API 同步后才能打开视频。"}
+      </div>
+    );
+  }
+
+  return (
+    <div className="creator-video-list">
+      {videos.slice(0, 10).map((video, index) => {
+        const videoUrl = getVideoUrl(video, creator);
+        const hasProducts =
+          video.hasProducts || (video.productIds ?? []).length > 0 || Number(video.salesCount ?? 0) > 0;
+        const title = video.title || video.description || `视频 ${index + 1}`;
+
+        return (
+          <a
+            className={`creator-video-card ${videoUrl ? "" : "disabled"}`}
+            href={videoUrl || undefined}
+            key={video.id || video.videoId || index}
+            onClick={(event) => {
+              if (!videoUrl) event.preventDefault();
+            }}
+            rel="noreferrer"
+            target="_blank"
+          >
+            <div className="creator-video-cover">
+              <VideoCoverImage creator={creator} video={video} />
+            </div>
+            <div className="creator-video-info">
+              <strong title={title}>{title}</strong>
+              <div className="creator-video-meta">
+                <span>
+                  <Eye size={13} />
+                  {formatCompactNumber(Number(video.views ?? 0))}
+                </span>
+                <span>
+                  <Clock3 size={13} />
+                  {formatShortDate(video.createDate)}
+                </span>
+                {hasProducts ? (
+                  <span className="commerce">
+                    <ShoppingBag size={13} />
+                    带货
+                  </span>
+                ) : null}
+              </div>
+              <em>
+                {videoUrl ? "打开 TikTok 视频" : "缺少视频链接 / video_id"}
+                <ExternalLink size={13} />
+              </em>
+            </div>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
+function CreatorDetailDrawer({
+  creator,
+  isAutomationRunning,
+  onContactChange,
+  onQueueOutreachDraft,
+  onStatusChange,
+}) {
   if (!creator) {
     return (
       <aside className="detail-drawer empty">
@@ -870,12 +1137,14 @@ function CreatorDetailDrawer({ creator, onContactChange, onStatusChange }) {
   const evaluation = evaluateCreatorLead(creator, creatorNow);
   const profileUrl = buildTikTokProfileUrl(creator.profileUrl ?? creator.handle);
   const nextStage = getNextCreatorStage(creator.crmStatus);
+  const outreach = creator.automation?.outreach;
+  const outreachStatus = outreach?.status || "not_started";
   const checklist = [
     ["打开 TikTok 主页", Boolean(profileUrl)],
     ["确认公开邮箱", Boolean(creator.contact?.email)],
     ["确认 Instagram / Linktree", Boolean(creator.contact?.instagram)],
     ["确认内容符合黑人女性发型类目", evaluation.keywordCount > 0],
-    ["确认曾出现商品关联视频", evaluation.productVideoCount > 0],
+    ["确认曾带货 / 商品关联", evaluation.productVideoCount > 0],
   ];
 
   return (
@@ -895,6 +1164,16 @@ function CreatorDetailDrawer({ creator, onContactChange, onStatusChange }) {
       <div className="drawer-body">
         <section className="creator-drawer-cover">
           <DrawerCoverImage creator={creator} />
+        </section>
+
+        <section className="drawer-section">
+          <div className="section-title-row">
+            <h3>真实视频明细</h3>
+            <Pill tone={creator.recentVideos?.length ? "processing" : "neutral"}>
+              {creator.recentVideos?.length ? `${creator.recentVideos.length} 条` : "待拉取"}
+            </Pill>
+          </div>
+          <CreatorVideoList creator={creator} />
         </section>
 
         <section className="drawer-section">
@@ -920,10 +1199,20 @@ function CreatorDetailDrawer({ creator, onContactChange, onStatusChange }) {
                   : `${evaluation.daysSinceLastPost} 天前`
               }
             />
-            <Field label="商品关联" value={`${evaluation.productVideoCount} 条视频`} />
+            <Field label="带货证据" value={`${evaluation.productVideoCount} 项`} />
             <Field label="社交账号" value={creator.contact?.socialAccount || "--"} />
             <Field label="来源" value={creator.source} />
           </dl>
+          {creator.sourceDataWarnings?.length ? (
+            <div className="source-warnings">
+              {creator.sourceDataWarnings.map((warning) => (
+                <span key={warning}>
+                  <AlertTriangle size={13} />
+                  {warning}
+                </span>
+              ))}
+            </div>
+          ) : null}
         </section>
 
         <section className="drawer-section">
@@ -995,9 +1284,31 @@ function CreatorDetailDrawer({ creator, onContactChange, onStatusChange }) {
         <section className="drawer-section script-section ai-reserved">
           <div className="section-title-row">
             <h3>AI 第一波沟通</h3>
-            <Pill tone="neutral">预留</Pill>
+            <Pill tone={creatorAutomationTone[outreachStatus] ?? "neutral"}>
+              {getCreatorAutomationLabel(outreachStatus)}
+            </Pill>
           </div>
-          <p>暂不生成或发送外联内容。联系方式确认后，这里会承接寄样或 affiliate 首轮草稿。</p>
+          <div className="outreach-status-grid">
+            <Field label="执行模式" value="Dry-run 草稿，不自动发送" />
+            <Field label="队列来源" value={outreach?.source || "待提交"} />
+            <Field label="队列 ID" value={outreach?.queueId || "--"} />
+            <Field label="更新时间" value={outreach?.updatedAt ? formatShortDate(outreach.updatedAt) : "--"} />
+          </div>
+          {outreach?.draft ? (
+            <pre className="outreach-draft">{outreach.draft}</pre>
+          ) : (
+            <p>点击生成草稿后，系统会把达人证据和联系方式写入本地队列；如配置 n8n webhook，会同步请求 n8n 生成草稿。</p>
+          )}
+          {outreach?.error ? <p className="outreach-error">{outreach.error}</p> : null}
+          <button
+            className="inline-automation"
+            disabled={isAutomationRunning}
+            onClick={() => onQueueOutreachDraft(creator.id)}
+            type="button"
+          >
+            <Sparkles size={16} />
+            {isAutomationRunning ? "提交中" : "生成联系草稿"}
+          </button>
         </section>
       </div>
 
@@ -1009,6 +1320,10 @@ function CreatorDetailDrawer({ creator, onContactChange, onStatusChange }) {
         <button onClick={() => onStatusChange(creator.id, "ready_to_contact")} type="button">
           <Check size={18} />
           联系方式已确认
+        </button>
+        <button disabled={isAutomationRunning} onClick={() => onQueueOutreachDraft(creator.id)} type="button">
+          <Sparkles size={17} />
+          {isAutomationRunning ? "提交中" : "生成草稿"}
         </button>
       </div>
     </aside>
@@ -1245,7 +1560,7 @@ function ImportModal({ onClose, onCreatorImport, variant = "operations" }) {
 export function App() {
   const [activeSection, setActiveSection] = useState("dashboard");
   const [taskList, setTaskList] = useState(initialTasks);
-  const [creatorList, setCreatorList] = useState([]);
+  const [creatorList, setCreatorList] = useState(loadSavedCreatorLeads);
   const [selectedTaskId, setSelectedTaskId] = useState(initialTasks[0]?.id);
   const [selectedCreatorId, setSelectedCreatorId] = useState(null);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -1261,9 +1576,9 @@ export function App() {
     qualification: "all",
     search: "",
   });
+  const [creatorAutomationBusyId, setCreatorAutomationBusyId] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSync, setLastSync] = useState("");
-  const initialSyncDone = useRef(false);
 
   const metrics = useMemo(() => calculateDashboardMetrics(taskList), [taskList]);
   const visibleTasks = useMemo(() => filterTasks(taskList, filters), [taskList, filters]);
@@ -1271,6 +1586,52 @@ export function App() {
   const selectedTask = taskList.find((task) => task.id === selectedTaskId) ?? taskList[0];
   const selectedCreator =
     creatorList.find((creator) => creator.id === selectedCreatorId) ?? creatorList[0];
+
+  useEffect(() => {
+    setCreatorList((current) => mergeRealCreatorLeads(current));
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(creatorStorageKey, JSON.stringify(creatorList));
+    } catch {
+      // Local persistence is helpful but not required for the workbench to run.
+    }
+  }, [creatorList]);
+
+  useEffect(() => {
+    if (creatorList.length === 0) {
+      return undefined;
+    }
+
+    const backupTimer = window.setTimeout(() => {
+      fetch("/api/local/creator-backup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: "tk-saas-creator-workbench",
+          creators: creatorList,
+        }),
+      }).catch(() => {
+        // Disk backup is best-effort in dev; localStorage still preserves the UI state.
+      });
+    }, 700);
+
+    return () => window.clearTimeout(backupTimer);
+  }, [creatorList]);
+
+  useEffect(() => {
+    if (creatorList.length === 0) {
+      if (selectedCreatorId) {
+        setSelectedCreatorId(null);
+      }
+      return;
+    }
+
+    if (!selectedCreatorId || !creatorList.some((creator) => creator.id === selectedCreatorId)) {
+      setSelectedCreatorId(creatorList[0].id);
+    }
+  }, [creatorList, selectedCreatorId]);
 
   function updateFilter(key, value) {
     setFilters((current) => ({ ...current, [key]: value }));
@@ -1307,6 +1668,68 @@ export function App() {
     );
   }
 
+  async function queueCreatorOutreachDraft(creatorId) {
+    const creator = creatorList.find((item) => item.id === creatorId);
+
+    if (!creator || creatorAutomationBusyId) {
+      return;
+    }
+
+    const requestedAt = new Date().toISOString();
+    const payload = buildCreatorAutomationPayload(creator, { requestedAt });
+
+    setCreatorAutomationBusyId(creatorId);
+    setCreatorList((current) =>
+      applyCreatorAutomationResult(current, creatorId, {
+        status: "queueing",
+        source: "tk-saas-web",
+        requestedAt,
+        updatedAt: requestedAt,
+        dryRun: true,
+        allowSend: false,
+      }),
+    );
+
+    try {
+      const response = await fetch("/api/local/creator-automation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => ({}));
+
+      if (!response.ok || result.ok === false) {
+        throw new Error(result.message || "达人联系自动化提交失败");
+      }
+
+      setCreatorList((current) =>
+        applyCreatorAutomationResult(current, creatorId, {
+          ...result,
+          requestedAt,
+          dryRun: true,
+          allowSend: false,
+        }),
+      );
+      showToast(result.n8nConfigured ? "n8n 草稿已生成并回写" : "Dry-run 草稿已生成，队列已落盘");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "达人联系自动化提交失败";
+      setCreatorList((current) =>
+        applyCreatorAutomationResult(current, creatorId, {
+          status: "failed",
+          source: "tk-saas-web",
+          error: message,
+          requestedAt,
+          updatedAt: new Date().toISOString(),
+          dryRun: true,
+          allowSend: false,
+        }),
+      );
+      showToast(`草稿生成失败：${message}`, "failed");
+    } finally {
+      setCreatorAutomationBusyId(null);
+    }
+  }
+
   function toggleCreatorStar(creatorId) {
     setCreatorList((current) =>
       current.map((creator) =>
@@ -1327,9 +1750,12 @@ export function App() {
 
   function importCreatorLeads(importedCreators, fileName) {
     setCreatorList((current) => {
-      const existingIds = new Set(current.map((c) => c.id));
-      const newItems = importedCreators.filter((c) => !existingIds.has(c.id));
-      return [...current, ...newItems];
+      const incomingById = new Map(importedCreators.map((creator) => [creator.id, creator]));
+      const updatedCurrent = current.map((creator) => incomingById.get(creator.id) ?? creator);
+      const existingIds = new Set(current.map((creator) => creator.id));
+      const newItems = importedCreators.filter((creator) => !existingIds.has(creator.id));
+
+      return [...updatedCurrent, ...newItems];
     });
     setSelectedCreatorId(importedCreators[0]?.id);
     setActiveSection("creators");
@@ -1337,9 +1763,14 @@ export function App() {
   }
 
   function clearImportedCreators() {
-    setCreatorList((current) => current.filter((c) => !c.source?.startsWith("EchoTik export:")));
+    setCreatorList((current) =>
+      current.filter(
+        (creator) =>
+          realSeedCreatorIds.has(creator.id),
+      ),
+    );
     setSelectedCreatorId(null);
-    showToast("已清空所有 EchoTik 导入达人");
+    showToast("已清空新导入/同步达人，历史达人已保留");
   }
 
   const syncEchoTikData = useCallback(
@@ -1347,40 +1778,78 @@ export function App() {
       if (isSyncing) return;
       setIsSyncing(true);
       try {
-        const allInfluencers = [];
-        for (let page = 1; page <= 10; page++) {
-          const result = await fetchInfluencerList({ region: "US", pageNum: page, minFollowers: 1000 });
-          allInfluencers.push(...result.list);
-          if (result.list.length < ECHOTIK_PAGE_SIZE) break;
-        }
+        const influencerById = new Map();
+        const keywordHitsById = new Map();
 
-        const leads = allInfluencers.map(mapInfluencerToCreatorLead);
+        const syncErrors = [];
 
-        if (leads.length > 0) {
-          for (const lead of leads.slice(0, 10)) {
-            try {
-              const videos = await fetchInfluencerVideos(lead.rawId, { pageNum: 1, sortField: 1, sortType: 1 });
-              if (videos.list.length > 0) {
-                lead.recentVideos = videos.list.slice(0, 10).map((v) => ({
-                  id: v.id,
-                  views: v.views,
-                  createDate: v.createDate,
-                  coverUrl: v.coverUrl,
-                }));
-                const bestCover = videos.list[0]?.coverUrl;
-                if (bestCover) lead.highPerformingCoverUrl = bestCover;
-              }
-            } catch {
-              // skip video fetch failures
+        for (const keyword of creatorSearchKeywords) {
+          try {
+            const result = await fetchInfluencerList({
+              region: "US",
+              pageNum: 1,
+              minFollowers: 1000,
+              keyword,
+            });
+
+          result.list.forEach((influencer) => {
+            const key = influencer.id || influencer.rawId || influencer.handle;
+            if (!key) return;
+
+            if (!influencerById.has(key)) {
+              influencerById.set(key, influencer);
+            }
+
+            const keywordHits = keywordHitsById.get(key) ?? new Set();
+            keywordHits.add(keyword);
+            keywordHitsById.set(key, keywordHits);
+          });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "EchoTik 同步失败";
+            syncErrors.push(`${keyword}: ${message}`);
+
+            if (/usage limit|quota/i.test(message)) {
+              break;
             }
           }
         }
 
+        const leads = [...influencerById.entries()].map(([key, influencer]) => {
+          const lead = mapInfluencerToCreatorLead(influencer, { keywords: creatorSearchKeywords });
+          const queryKeywordHits = [...(keywordHitsById.get(key) ?? [])];
+
+          return {
+            ...lead,
+            matchedKeywords: [...new Set([...(lead.matchedKeywords ?? []), ...queryKeywordHits])],
+          };
+        });
+
+        if (leads.length === 0) {
+          throw new Error(syncErrors[0] || "EchoTik 未返回可用达人，请稍后重试或导入 CSV/Excel");
+        }
+
         setCreatorList((current) => {
-          const existingIds = new Set(current.map((c) => c.id));
-          const newItems = leads.filter((c) => !existingIds.has(c.id));
-          if (newItems.length === 0) return current;
-          return [...current, ...newItems];
+          const incomingById = new Map(leads.map((lead) => [lead.id, lead]));
+          const updatedCurrent = current.map((creator) =>
+            incomingById.has(creator.id)
+              ? {
+                  ...incomingById.get(creator.id),
+                  contact: {
+                    ...incomingById.get(creator.id).contact,
+                    instagram: creator.contact?.instagram ?? incomingById.get(creator.id).contact?.instagram ?? "",
+                    notes: creator.contact?.notes || incomingById.get(creator.id).contact?.notes,
+                  },
+                  crmStatus: creator.crmStatus,
+                  recentVideos: creator.recentVideos?.length ? creator.recentVideos : incomingById.get(creator.id).recentVideos,
+                  highPerformingCoverUrl: creator.highPerformingCoverUrl || incomingById.get(creator.id).highPerformingCoverUrl,
+                  videoDetailsFetched: creator.videoDetailsFetched,
+                }
+              : creator,
+          );
+          const existingIds = new Set(current.map((creator) => creator.id));
+          const newItems = leads.filter((lead) => !existingIds.has(lead.id));
+
+          return [...updatedCurrent, ...newItems];
         });
 
         if (leads.length > 0 && !selectedCreatorId) {
@@ -1389,7 +1858,7 @@ export function App() {
 
         const now = new Date();
         setLastSync(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`);
-        showToast(`同步 ${leads.length} 达人，US 区 1K+ 粉丝带视频封面`);
+        showToast(syncErrors.length ? `同步 ${leads.length} 个达人，部分关键词失败` : `同步 ${leads.length} 个 EchoTik 关键词达人`);
       } catch (error) {
         showToast(`同步失败: ${error.message}`, "failed");
       } finally {
@@ -1400,11 +1869,83 @@ export function App() {
   );
 
   useEffect(() => {
-    if (activeSection === "creators" && !initialSyncDone.current) {
-      initialSyncDone.current = true;
-      syncEchoTikData();
+    const creator = creatorList.find((item) => item.id === selectedCreatorId);
+
+    if (
+      !creator?.rawId ||
+      creator.videoDetailsFetched ||
+      creator.videoDetailsLoading ||
+      (creator.recentVideos ?? []).length > 0
+    ) {
+      return undefined;
     }
-  }, [activeSection, syncEchoTikData]);
+
+    let cancelled = false;
+
+    setCreatorList((current) =>
+      current.map((item) =>
+        item.id === creator.id
+          ? {
+              ...item,
+              videoDetailsLoading: true,
+            }
+          : item,
+      ),
+    );
+
+    fetchInfluencerVideos(creator.rawId, { pageNum: 1, sortField: 1, sortType: 1 })
+      .then((videos) => {
+        if (cancelled) return;
+
+        const recentVideos = mapFetchedVideos(videos.list.slice(0, 10));
+
+        setCreatorList((current) =>
+          current.map((item) => {
+            if (item.id !== creator.id) {
+              return item;
+            }
+
+            const videoWarnings = recentVideos.length > 0 ? [] : ["视频接口返回空"];
+            const sourceDataWarnings = [
+              ...(item.sourceDataWarnings ?? []).filter((warning) => !warning.includes("视频")),
+              ...videoWarnings,
+            ];
+
+            return {
+              ...item,
+              recentVideos,
+              highPerformingCoverUrl: recentVideos.find((video) => video.coverUrl)?.coverUrl || item.highPerformingCoverUrl,
+              sourceDataWarnings,
+              videoDetailsFetched: true,
+              videoDetailsLoading: false,
+            };
+          }),
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+
+        setCreatorList((current) =>
+          current.map((item) =>
+            item.id === creator.id
+              ? {
+                  ...item,
+                  sourceDataWarnings: [
+                    ...(item.sourceDataWarnings ?? []).filter((warning) => !warning.includes("视频")),
+                    "视频接口拉取失败",
+                  ],
+                  videoDetailsFetched: true,
+                  videoDetailsLoading: false,
+                }
+              : item,
+          ),
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [creatorList, selectedCreatorId]);
 
   function showToast(message, tone = "copied") {
     setToastState({ message, tone });
@@ -1487,7 +2028,9 @@ export function App() {
       {activeSection === "creators" ? (
         <CreatorDetailDrawer
           creator={selectedCreator}
+          isAutomationRunning={creatorAutomationBusyId === selectedCreator?.id}
           onContactChange={updateCreatorContact}
+          onQueueOutreachDraft={queueCreatorOutreachDraft}
           onStatusChange={updateCreatorCrmStatus}
         />
       ) : (

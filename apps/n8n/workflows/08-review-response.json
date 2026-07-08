@@ -1,0 +1,271 @@
+{
+  "name": "\u8bc4\u4ef7\u56de\u590d - Review Response Generator",
+  "nodes": [
+    {
+      "id": "trigger-manual",
+      "name": "\u624b\u52a8\u89e6\u53d1 / Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ],
+      "webhookId": "review-response",
+      "parameters": {
+        "path": "review-response"
+      }
+    },
+    {
+      "id": "switch-rating",
+      "name": "\u6309\u8bc4\u5206\u5206\u6d41",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ],
+      "parameters": {
+        "dataType": "number",
+        "value1": "={{ $json.body.rating || $json.rating || 3 }}",
+        "rules": [
+          {
+            "value": 1,
+            "output": 0
+          },
+          {
+            "value": 2,
+            "output": 1
+          },
+          {
+            "value": 3,
+            "output": 2
+          },
+          {
+            "value": 4,
+            "output": 3
+          },
+          {
+            "value": 5,
+            "output": 4
+          }
+        ],
+        "fallbackOutput": 2
+      }
+    },
+    {
+      "id": "tpl-1star",
+      "name": "1-2\u661f\uff1a\u5dee\u8bc4\u56de\u590d",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        650,
+        200
+      ],
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "template",
+              "value": "Thanks for your feedback, love. We are deeply sorry if there is anything that has let you down. Our team've reached out to you to give you a satisfactory solution and will take your feedback seriously. If there's anything else we can do to improve your experience, we're always happy to help! Looking forward to your reply~"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "tpl-3star",
+      "name": "3\u661f\uff1a\u4e2d\u6027\u56de\u590d",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        650,
+        400
+      ],
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "template",
+              "value": "Dear, We are sorry that this order didn't meet your expectations. We've reached out to you to acknowledge your concern and give you a satisfactory solution. Looking forward to your reply~"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "tpl-4star",
+      "name": "4-5\u661f\uff1a\u597d\u8bc4\u56de\u590d",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        650,
+        550
+      ],
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "template",
+              "value": "Thank you so much for your kind words! We're thrilled that you love your purchase. Your support means the world to us and we look forward to serving you again. Have a wonderful day!"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "call-qwen",
+      "name": "Qwen \u751f\u6210\u53d8\u4f53",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        850,
+        350
+      ],
+      "parameters": {
+        "url": "http://192.168.9.111:8080/v1/chat/completions",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "default"
+            },
+            {
+              "name": "max_tokens",
+              "value": 200
+            },
+            {
+              "name": "temperature",
+              "value": 0.7
+            },
+            {
+              "name": "messages",
+              "value": [
+                {
+                  "role": "system",
+                  "content": "You are a customer service AI. Rewrite the template into a natural-sounding review reply. Keep same tone and intent. Change wording to avoid repetition. Output ONLY the reply text."
+                },
+                {
+                  "role": "user",
+                  "content": "=Template: {{ $json.template }}\nRating: {{ ($json.body.rating || $json.rating) }}/5 stars\nCustomer name: {{ ($json.body.customerName || $json.customerName || '') }}"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "respond-review",
+      "name": "\u8fd4\u56de\u7ed3\u679c",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1050,
+        350
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ 'rating': $json.body.rating, 'original_template': $json.template, 'reply': $json.choices[0].message.content }"
+      }
+    }
+  ],
+  "connections": {
+    "trigger-manual": {
+      "main": [
+        [
+          {
+            "node": "switch-rating",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "switch-rating": {
+      "main": [
+        [
+          {
+            "node": "tpl-1star",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "tpl-1star",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "tpl-3star",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "tpl-4star",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "tpl-4star",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tpl-1star": {
+      "main": [
+        [
+          {
+            "node": "call-qwen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tpl-3star": {
+      "main": [
+        [
+          {
+            "node": "call-qwen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tpl-4star": {
+      "main": [
+        [
+          {
+            "node": "call-qwen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "call-qwen": {
+      "main": [
+        [
+          {
+            "node": "respond-review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {},
+  "active": false
+}

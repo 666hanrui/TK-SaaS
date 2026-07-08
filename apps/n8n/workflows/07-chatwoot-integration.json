@@ -1,0 +1,409 @@
+{
+  "name": "Chatwoot \u96c6\u6210 - \u81ea\u52a8\u56de\u590d\u5de5\u4f5c\u6d41",
+  "nodes": [
+    {
+      "id": "chatwoot-webhook",
+      "name": "Chatwoot Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ],
+      "webhookId": "chatwoot",
+      "parameters": {
+        "path": "chatwoot",
+        "options": {}
+      }
+    },
+    {
+      "id": "classify-intent",
+      "name": "\u5206\u7c7b\u610f\u56fe",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ],
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.body.message_type === 'incoming' ? ($json.body.content || '').toLowerCase() : 'not_incoming' }}",
+        "rules": [
+          {
+            "value": "not_incoming",
+            "output": 0
+          },
+          {
+            "regex": "\\b(refund|return|money back|\u9000|refou|reembolso|restituci\u00f3n|reembours|R\u00fcckerstattung)\\b",
+            "output": 1
+          },
+          {
+            "regex": "\\b(complaint|bad|terrible|awful|poor|disappointed|\u4e0d\u6ee1\u610f|queja|reclamo|plainte|Beschwerde)\\b",
+            "output": 2
+          },
+          {
+            "regex": "\\b(shipping|delivery|tracking|not received|\u672a\u6536\u5230|entrega|livraison|Lieferung)\\b",
+            "output": 3
+          },
+          {
+            "regex": "\\b(size|color|quality|damaged|broken|wrong|\u7455\u75b5|defectuoso|endommag\u00e9|besch\u00e4digt)\\b",
+            "output": 4
+          }
+        ],
+        "fallbackOutput": 5
+      }
+    },
+    {
+      "id": "noop-ignore",
+      "name": "\u5ffd\u7565\uff08\u975e\u5ba2\u6237\u6d88\u606f\uff09",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        650,
+        100
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "tpl-refund",
+      "name": "\u6a21\u677f\uff1a\u9000\u6b3e/\u9000\u8d27",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        650,
+        200
+      ],
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "template",
+              "value": "Hi xxx, I am from MissRola/Estrella Hair. I noticed your comment and feel very sorry for this order didn't meet your satisfaction. We support free return policy. Could you return our package? And then we will refund the order and apply $20 compensation for you. If there's anything else we can do to improve your experience, we're always happy to help! Looking forward to your reply~"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "tpl-complaint",
+      "name": "\u6a21\u677f\uff1a\u5dee\u8bc4\u56de\u590d",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        650,
+        310
+      ],
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "template",
+              "value": "Dear, We are sorry that this order didn't meet your expectations. We've reached out to you to acknowledge your concern and give you a satisfactory solution. Looking forward to your reply~"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "tpl-shipping",
+      "name": "\u6a21\u677f\uff1a\u7269\u6d41\u67e5\u8be2",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        650,
+        420
+      ],
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "template",
+              "value": "Hello dear, thank you for reaching out. Let me check the shipping status for you right away. Could you please provide your order number? I will get back to you with the tracking details as soon as possible."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "tpl-product",
+      "name": "\u6a21\u677f\uff1a\u4ea7\u54c1\u8d28\u91cf\u95ee\u9898",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        650,
+        530
+      ],
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "template",
+              "value": "Dear, we are sorry to hear about the issue with your product. We take quality concerns very seriously. Please send us a photo of the issue and we will make it right for you - whether that's a replacement or a full refund. We appreciate your feedback as it helps us improve!"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "tpl-default",
+      "name": "\u6a21\u677f\uff1a\u901a\u7528\u56de\u590d",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        650,
+        640
+      ],
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "template",
+              "value": "Thanks for your feedback, love. We are deeply sorry if there is anything that has let you down. Our team've reached out to you to give you a satisfactory solution and will take your feedback seriously. If there's anything else we can do to improve your experience, we're always happy to help! Looking forward to your reply~"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "paraphrase",
+      "name": "\u8c03\u7528 Qwen \u751f\u6210\u53d8\u4f53",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        850,
+        350
+      ],
+      "parameters": {
+        "url": "http://192.168.9.111:8080/v1/chat/completions",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "default"
+            },
+            {
+              "name": "max_tokens",
+              "value": 300
+            },
+            {
+              "name": "temperature",
+              "value": 0.8
+            },
+            {
+              "name": "messages",
+              "value": [
+                {
+                  "role": "system",
+                  "content": "You are a customer service AI for MissRola/Estrella Hair (wig & hair extension brand). Rewrite the given template into a natural, human-sounding message. Change wording and sentence structure but keep the core intent. Output ONLY the message text, no explanations. Max 80 words. No emojis."
+                },
+                {
+                  "role": "user",
+                  "content": "=Template: {{ $json.template }}\nCustomer name: {{ $json.body.sender ? $json.body.sender.name || '' : '' }}\nChannel: chat"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "send-chatwoot",
+      "name": "\u53d1\u9001\u56de\u590d\u5230 Chatwoot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1050,
+        350
+      ],
+      "parameters": {
+        "url": "=http://localhost:3000/api/v1/accounts/3/conversations/{{ $json.body.conversation.id }}/messages",
+        "options": {
+          "headers": {
+            "Content-Type": "application/json",
+            "api_access_token": "8JL8W3RBMQF13kSmGSsyLqSy"
+          }
+        },
+        "sendBody": true,
+        "method": "POST",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "={{ $json.choices[0].message.content }}"
+            },
+            {
+              "name": "message_type",
+              "value": "outgoing"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "noop-end",
+      "name": "\u7ed3\u675f",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        850,
+        700
+      ],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "chatwoot-webhook": {
+      "main": [
+        [
+          {
+            "node": "classify-intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "classify-intent": {
+      "main": [
+        [
+          {
+            "node": "noop-ignore",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "tpl-refund",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "tpl-complaint",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "tpl-shipping",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "tpl-product",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "tpl-default",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tpl-refund": {
+      "main": [
+        [
+          {
+            "node": "paraphrase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tpl-complaint": {
+      "main": [
+        [
+          {
+            "node": "paraphrase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tpl-shipping": {
+      "main": [
+        [
+          {
+            "node": "paraphrase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tpl-product": {
+      "main": [
+        [
+          {
+            "node": "paraphrase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tpl-default": {
+      "main": [
+        [
+          {
+            "node": "paraphrase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "paraphrase": {
+      "main": [
+        [
+          {
+            "node": "send-chatwoot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "send-chatwoot": {
+      "main": [
+        [
+          {
+            "node": "noop-end",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "noop-ignore": {
+      "main": [
+        [
+          {
+            "node": "noop-end",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {},
+  "active": false
+}

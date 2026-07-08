@@ -11,18 +11,42 @@ async function callApi(path, params = {}) {
     }
   });
 
-  const response = await fetch(url.toString(), {
-    headers: {
-      Authorization: `Basic ${CREDENTIALS}`,
-      Accept: "application/json",
-    },
-  });
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 20000);
+  let response;
 
-  if (!response.ok) {
-    throw new Error(`EchoTik API error: ${response.status}`);
+  try {
+    response = await fetch(url.toString(), {
+      headers: {
+        Authorization: `Basic ${CREDENTIALS}`,
+        Accept: "application/json",
+      },
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("EchoTik API timeout");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
   }
 
-  const data = await response.json();
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    throw new Error(data?.message || data?.msg || `EchoTik API error: ${response.status}`);
+  }
+
+  if (!data) {
+    throw new Error("EchoTik API returned invalid JSON");
+  }
+
   if (data.code !== 0) {
     throw new Error(data.message || "EchoTik API returned error");
   }
@@ -48,6 +72,7 @@ export async function fetchInfluencerList({
 
   if (categoryId) params.product_category_id = categoryId;
   if (minFollowers) params.min_total_followers_cnt = minFollowers;
+  if (keyword) params.keyword = keyword;
 
   const data = await callApi("/influencer/list", params);
 
@@ -123,6 +148,7 @@ function normalizeInfluencer(raw) {
   const followers = raw.total_followers_cnt || 0;
   const productCount = raw.total_product_cnt || 0;
   const handle = raw.unique_id || "";
+  const avatarUrl = proxyCdnUrl(raw.avatar) || "";
 
   return {
     id: `echotik-${raw.user_id || ""}`,
@@ -130,7 +156,8 @@ function normalizeInfluencer(raw) {
     handle,
     uniqueId: handle,
     displayName: raw.nick_name || handle || "Unknown",
-    avatar: proxyCdnUrl(raw.avatar) || "",
+    avatar: avatarUrl,
+    avatarUrl,
     followers,
     signature: raw.signature || "",
     bio: raw.signature || "",
@@ -155,9 +182,16 @@ function normalizeInfluencer(raw) {
 }
 
 function normalizeVideo(raw) {
+  const uniqueId = raw.unique_id || "";
+  const videoId = raw.video_id || "";
+
   return {
-    id: raw.video_id || "",
+    id: videoId,
+    videoId,
+    title: raw.video_desc || "",
     description: raw.video_desc || "",
+    uniqueId,
+    videoUrl: uniqueId && videoId ? `https://www.tiktok.com/@${uniqueId}/video/${videoId}` : "",
     coverUrl: proxyCdnUrl(raw.reflow_cover) || "",
     duration: raw.duration || 0,
     createTime: raw.create_time ? Number(raw.create_time) : 0,
@@ -189,12 +223,24 @@ function parseProductIds(raw) {
   return [];
 }
 
-export function mapInfluencerToCreatorLead(inf) {
+function inferMatchedKeywordsFromInfluencer(inf, keywords = []) {
+  const text = [inf.displayName, inf.handle, inf.signature, inf.bio, inf.category]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return keywords.filter((keyword) => text.includes(keyword.toLowerCase()));
+}
+
+export function mapInfluencerToCreatorLead(inf, { keywords = [] } = {}) {
   const products = inf.totalProductCnt || 0;
   const followers = inf.followers || 0;
   const likesFollowerRatio = followers > 0 ? (inf.totalDiggCnt || 0) / followers : 0;
+  const matchedKeywords = inferMatchedKeywordsFromInfluencer(inf, keywords);
+
   return {
     id: inf.id,
+    rawId: inf.rawId,
     handle: inf.handle || inf.uniqueId,
     displayName: inf.displayName,
     followers,
@@ -202,8 +248,9 @@ export function mapInfluencerToCreatorLead(inf) {
     source: inf.source || "EchoTik API",
     description: inf.signature || inf.bio || `EchoTik 导入达人`,
     recommendedProducts: [],
-    matchedKeywords: [],
-    highPerformingCoverUrl: inf.avatar || "",
+    matchedKeywords,
+    highPerformingCoverUrl: "",
+    avatarUrl: inf.avatarUrl || inf.avatar || "",
     productAssociatedVideos: [],
     contact: {
       email: inf.contactEmail || "",
@@ -213,6 +260,7 @@ export function mapInfluencerToCreatorLead(inf) {
         : "待人工打开 TikTok 主页确认联系方式",
     },
     recentVideos: [],
+    sourceDataWarnings: ["视频明细未同步"],
     ecScore: inf.ecScoreNumber,
     totalDiggCnt: inf.totalDiggCnt,
     totalViewsCnt: inf.totalViewsCnt,

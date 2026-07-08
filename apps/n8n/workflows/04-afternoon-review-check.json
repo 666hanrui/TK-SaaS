@@ -1,9 +1,9 @@
 {
-  "name": "下午评价检查 - Afternoon Review Check",
+  "name": "\u4e0b\u5348\u8bc4\u4ef7\u68c0\u67e5 - Afternoon Review Check",
   "nodes": [
     {
       "id": "d2d4c62f-d278-4baf-9058-4eb98746d07d",
-      "name": "15:30 定时触发",
+      "name": "15:30 \u5b9a\u65f6\u89e6\u53d1",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1,
       "position": [
@@ -24,7 +24,7 @@
     },
     {
       "id": "d7aa802f-da54-44a5-bec6-48203b851f13",
-      "name": "获取新增评价",
+      "name": "\u83b7\u53d6\u65b0\u589e\u8bc4\u4ef7",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 3,
       "position": [
@@ -41,7 +41,7 @@
     },
     {
       "id": "1114da42-07c9-40c4-ad1c-fba4fc24f655",
-      "name": "分类差评/中评/好评",
+      "name": "\u5206\u7c7b\u5dee\u8bc4/\u4e2d\u8bc4/\u597d\u8bc4",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -50,12 +50,12 @@
       ],
       "parameters": {
         "language": "python",
-        "code": "results = []\n\nfor review in items:\n    rating = review.get('rating', 0)\n    review_id = review.get('id')\n    content = review.get('content', '')\n    reply_status = review.get('reply_status', 'pending')\n    \n    if reply_status == 'replied':\n        continue\n    \n    if rating <= 2:\n        category = 'bad'\n        priority = 'high'\n    elif rating == 3:\n        category = 'neutral'\n        priority = 'medium'\n    else:\n        category = 'good'\n        priority = 'low'\n    \n    # 检测是否需要索要视频/图片\n    need_evidence = any(kw in content.lower() for kw in [\n        'broken', 'damage', 'crack', 'fell', 'falling', \n        'defective', 'not working', '坏了', '破损', '掉落', '质量'\n    ])\n    \n    results.append({\n        'review_id': review_id,\n        'category': category,\n        'priority': priority,\n        'rating': rating,\n        'content': content,\n        'need_evidence': need_evidence,\n        'reply_status': reply_status,\n    })\n\n# 差评优先排序\nsort_order = {'bad': 0, 'neutral': 1, 'good': 2}\nresults.sort(key=lambda x: sort_order.get(x['category'], 99))\n\nreturn results"
+        "code": "results = []\n\nfor review in items:\n    rating = review.get('rating', 0)\n    review_id = review.get('id')\n    content = review.get('content', '')\n    reply_status = review.get('reply_status', 'pending')\n    \n    if reply_status == 'replied':\n        continue\n    \n    if rating <= 2:\n        category = 'bad'\n        priority = 'high'\n    elif rating == 3:\n        category = 'neutral'\n        priority = 'medium'\n    else:\n        category = 'good'\n        priority = 'low'\n    \n    # \u68c0\u6d4b\u662f\u5426\u9700\u8981\u7d22\u8981\u89c6\u9891/\u56fe\u7247\n    need_evidence = any(kw in content.lower() for kw in [\n        'broken', 'damage', 'crack', 'fell', 'falling', \n        'defective', 'not working', '\u574f\u4e86', '\u7834\u635f', '\u6389\u843d', '\u8d28\u91cf'\n    ])\n    \n    results.append({\n        'review_id': review_id,\n        'category': category,\n        'priority': priority,\n        'rating': rating,\n        'content': content,\n        'need_evidence': need_evidence,\n        'reply_status': reply_status,\n    })\n\n# \u5dee\u8bc4\u4f18\u5148\u6392\u5e8f\nsort_order = {'bad': 0, 'neutral': 1, 'good': 2}\nresults.sort(key=lambda x: sort_order.get(x['category'], 99))\n\nreturn results"
       }
     },
     {
       "id": "1b931e63-89b9-4e3e-9129-d079ebbc44c5",
-      "name": "同步待办到 TK-SaaS",
+      "name": "\u540c\u6b65\u5f85\u529e\u5230 TK-SaaS",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 3,
       "position": [
@@ -83,33 +83,33 @@
     }
   ],
   "connections": {
-    "15:30 定时触发": {
+    "15:30 \u5b9a\u65f6\u89e6\u53d1": {
       "main": [
         [
           {
-            "node": "获取新增评价",
+            "node": "\u83b7\u53d6\u65b0\u589e\u8bc4\u4ef7",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "获取新增评价": {
+    "\u83b7\u53d6\u65b0\u589e\u8bc4\u4ef7": {
       "main": [
         [
           {
-            "node": "分类差评/中评/好评",
+            "node": "\u5206\u7c7b\u5dee\u8bc4/\u4e2d\u8bc4/\u597d\u8bc4",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "分类差评/中评/好评": {
+    "\u5206\u7c7b\u5dee\u8bc4/\u4e2d\u8bc4/\u597d\u8bc4": {
       "main": [
         [
           {
-            "node": "同步待办到 TK-SaaS",
+            "node": "\u540c\u6b65\u5f85\u529e\u5230 TK-SaaS",
             "type": "main",
             "index": 0
           }
@@ -119,7 +119,5 @@
   },
   "settings": {},
   "staticData": null,
-  "tags": [],
-  "id": "09b5df88-10ab-4940-8aa0-6f61ac56207c",
-  "versionId": "867cb33e-9587-4144-b830-bc72ccb29ce1"
+  "active": false
 }

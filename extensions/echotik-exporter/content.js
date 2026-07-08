@@ -3,7 +3,6 @@
 
   const STORAGE_KEY = 'echotik_influencers_export';
   let captured = [];
-  let autoPaging = false;
   let panel = null;
 
   function loadStored() {
@@ -22,6 +21,24 @@
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(captured));
     } catch (e) {
       // ignore
+    }
+  }
+
+  function addRecord(items) {
+    if (!Array.isArray(items)) return;
+    let added = 0;
+    for (const item of items) {
+      if (!item || !item.influencer_id) continue;
+      const exists = captured.some((c) => c.influencer_id === item.influencer_id);
+      if (!exists) {
+        captured.push(item);
+        added++;
+      }
+    }
+    if (added > 0) {
+      saveStored();
+      updatePanel();
+      setStatus(`新增 ${added} 条，共 ${captured.length} 条`);
     }
   }
 
@@ -146,6 +163,17 @@
     }
   }
 
+  function setStatus(message) {
+    if (!panel) return;
+    const statusEl = panel.querySelector('.echotik-export-status');
+    if (statusEl) {
+      statusEl.textContent = message;
+      setTimeout(() => {
+        statusEl.textContent = '';
+      }, 4000);
+    }
+  }
+
   function createPanel() {
     if (panel) return;
 
@@ -158,7 +186,6 @@
       </div>
       <div class="echotik-export-body">
         <button class="echotik-export-btn" data-action="clear">清空</button>
-        <button class="echotik-export-btn" data-action="auto">自动翻页采集</button>
         <button class="echotik-export-btn primary" data-action="json">导出 JSON</button>
         <button class="echotik-export-btn primary" data-action="csv">导出 CSV</button>
       </div>
@@ -173,18 +200,7 @@
     updatePanel();
   }
 
-  function setStatus(message) {
-    if (!panel) return;
-    const statusEl = panel.querySelector('.echotik-export-status');
-    if (statusEl) {
-      statusEl.textContent = message;
-      setTimeout(() => {
-        statusEl.textContent = '';
-      }, 4000);
-    }
-  }
-
-  async function handleAction(event) {
+  function handleAction(event) {
     const action = event.target.dataset.action;
 
     if (action === 'clear') {
@@ -216,88 +232,69 @@
       setStatus(`已导出 ${captured.length} 条 CSV`);
       return;
     }
-
-    if (action === 'auto') {
-      if (autoPaging) {
-        setStatus('自动采集中，请继续翻页或等待');
-        return;
-      }
-      autoPaging = true;
-      event.target.textContent = '采集中...';
-      event.target.disabled = true;
-      setStatus('已开始自动采集，请在页面翻页或滚动');
-      return;
-    }
   }
 
-  function addRecord(items) {
-    if (!Array.isArray(items)) return;
-    let added = 0;
-    for (const item of items) {
-      if (!item || !item.influencer_id) continue;
-      const exists = captured.some((c) => c.influencer_id === item.influencer_id);
-      if (!exists) {
-        captured.push(item);
-        added++;
-      }
-    }
-    if (added > 0) {
-      saveStored();
-      updatePanel();
-      setStatus(`新增 ${added} 条，共 ${captured.length} 条`);
-    }
-  }
+  function injectInterceptor() {
+    const script = document.createElement('script');
+    script.textContent = `
+      (function () {
+        const intercepted = [];
 
-  function interceptFetch() {
-    const originalFetch = window.fetch;
-    window.fetch = async function (...args) {
-      const response = await originalFetch.apply(this, args);
-      const url = args[0];
-      if (typeof url === 'string' && url.includes('/api/v1/data/influencers?')) {
-        try {
-          const clone = response.clone();
-          const data = await clone.json();
-          if (data && data.code === 0 && Array.isArray(data.data)) {
-            addRecord(data.data);
-          }
-        } catch (e) {
-          // ignore
+        function sendToExtension(data) {
+          window.postMessage({ source: 'echotik-exporter', type: 'captured', data }, '*');
         }
-      }
-      return response;
-    };
-  }
 
-  function interceptXHR() {
-    const originalOpen = XMLHttpRequest.prototype.open;
-    const originalSend = XMLHttpRequest.prototype.send;
+        const originalFetch = window.fetch;
+        window.fetch = async function (...args) {
+          const response = await originalFetch.apply(this, args);
+          const url = args[0];
+          if (typeof url === 'string' && url.includes('/api/v1/data/influencers?')) {
+            try {
+              const clone = response.clone();
+              const json = await clone.json();
+              if (json && json.code === 0 && Array.isArray(json.data)) {
+                sendToExtension(json.data);
+              }
+            } catch (e) {}
+          }
+          return response;
+        };
 
-    XMLHttpRequest.prototype.open = function (method, url, ...rest) {
-      this._url = url;
-      return originalOpen.call(this, method, url, ...rest);
-    };
-
-    XMLHttpRequest.prototype.send = function (...args) {
-      this.addEventListener('load', function () {
-        if (typeof this._url === 'string' && this._url.includes('/api/v1/data/influencers?')) {
-          try {
-            const data = JSON.parse(this.responseText);
-            if (data && data.code === 0 && Array.isArray(data.data)) {
-              addRecord(data.data);
+        const originalOpen = XMLHttpRequest.prototype.open;
+        const originalSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+          this._url = url;
+          return originalOpen.call(this, method, url, ...rest);
+        };
+        XMLHttpRequest.prototype.send = function (...args) {
+          this.addEventListener('load', function () {
+            if (typeof this._url === 'string' && this._url.includes('/api/v1/data/influencers?')) {
+              try {
+                const json = JSON.parse(this.responseText);
+                if (json && json.code === 0 && Array.isArray(json.data)) {
+                  sendToExtension(json.data);
+                }
+              } catch (e) {}
             }
-          } catch (e) {
-            // ignore
-          }
-        }
-      });
-      return originalSend.apply(this, args);
-    };
+          });
+          return originalSend.apply(this, args);
+        };
+      })();
+    `;
+    (document.head || document.documentElement).appendChild(script);
+    script.remove();
   }
 
   function init() {
     loadStored();
-    interceptFetch();
-    interceptXHR();
+    injectInterceptor();
+
+    window.addEventListener('message', (event) => {
+      if (event.source !== window) return;
+      if (event.data && event.data.source === 'echotik-exporter' && event.data.type === 'captured') {
+        addRecord(event.data.data);
+      }
+    });
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', createPanel);

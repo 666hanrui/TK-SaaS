@@ -1,9 +1,9 @@
 {
-  "name": "售后截止跟踪 - After-sales Deadline Tracker",
+  "name": "\u552e\u540e\u622a\u6b62\u8ddf\u8e2a - After-sales Deadline Tracker",
   "nodes": [
     {
       "id": "545be02e-0424-4368-bf40-e44c8884ddf2",
-      "name": "每4小时触发",
+      "name": "\u6bcf4\u5c0f\u65f6\u89e6\u53d1",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1,
       "position": [
@@ -23,7 +23,7 @@
     },
     {
       "id": "f9a83351-c93d-4134-9648-c903e2825193",
-      "name": "获取售后工单",
+      "name": "\u83b7\u53d6\u552e\u540e\u5de5\u5355",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 3,
       "position": [
@@ -40,7 +40,7 @@
     },
     {
       "id": "4f40afac-18bd-401e-a04b-52babc325c13",
-      "name": "检查截止时间",
+      "name": "\u68c0\u67e5\u622a\u6b62\u65f6\u95f4",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -49,12 +49,12 @@
       ],
       "parameters": {
         "language": "python",
-        "code": "import datetime\n\nnow = datetime.datetime.now(datetime.timezone.utc)\n\nalerts = []\nfor case in items:\n    case_id = case.get('id')\n    case_type = case.get('after_sale_type')\n    status = case.get('after_sale_status')\n    \n    # 争议证据 24h 倒计时\n    evidence_deadline = case.get('evidence_deadline')\n    if evidence_deadline:\n        try:\n            deadline = datetime.datetime.fromisoformat(evidence_deadline.replace('Z', '+00:00'))\n            remaining = (deadline - now).total_seconds() / 3600\n            if remaining < 0:\n                alerts.append({\n                    'case_id': case_id,\n                    'type': 'evidence_overdue',\n                    'deadline': evidence_deadline,\n                    'remaining_hours': round(remaining, 1),\n                    'message': '证据提交已超时'\n                })\n            elif remaining <= 24:\n                alerts.append({\n                    'case_id': case_id,\n                    'type': 'evidence_urgent',\n                    'deadline': evidence_deadline,\n                    'remaining_hours': round(remaining, 1),\n                    'message': f'证据提交截止剩余 {round(remaining)}h'\n                })\n        except:\n            pass\n    \n    # 申诉窗口 21 天\n    appeal_deadline = case.get('appeal_deadline')\n    if appeal_deadline:\n        try:\n            deadline = datetime.datetime.fromisoformat(appeal_deadline.replace('Z', '+00:00'))\n            remaining = (deadline - now).total_seconds() / 3600 / 24\n            if remaining < 0:\n                alerts.append({\n                    'case_id': case_id,\n                    'type': 'appeal_overdue',\n                    'deadline': appeal_deadline,\n                    'remaining_days': round(remaining, 1),\n                    'message': '申诉窗口已关闭'\n                })\n            elif remaining <= 7:\n                alerts.append({\n                    'case_id': case_id,\n                    'type': 'appeal_warning',\n                    'deadline': appeal_deadline,\n                    'remaining_days': round(remaining, 1),\n                    'message': f'申诉窗口剩余 {round(remaining)} 天'\n                })\n        except:\n            pass\n    \n    # 初始售后 4 个工作日响应\n    response_deadline = case.get('response_deadline')\n    if response_deadline and status in ['open', 'pending']:\n        try:\n            deadline = datetime.datetime.fromisoformat(response_deadline.replace('Z', '+00:00'))\n            remaining = (deadline - now).total_seconds() / 3600\n            if remaining <= 24:\n                alerts.append({\n                    'case_id': case_id,\n                    'type': 'response_urgent',\n                    'deadline': response_deadline,\n                    'remaining_hours': round(remaining, 1),\n                    'message': f'售后响应剩余 {round(remaining)}h'\n                })\n        except:\n            pass\n\nalerts.sort(key=lambda x: x.get('remaining_hours', 999))\nreturn alerts"
+        "code": "import datetime\n\nnow = datetime.datetime.now(datetime.timezone.utc)\n\nalerts = []\nfor case in items:\n    case_id = case.get('id')\n    case_type = case.get('after_sale_type')\n    status = case.get('after_sale_status')\n    \n    # \u4e89\u8bae\u8bc1\u636e 24h \u5012\u8ba1\u65f6\n    evidence_deadline = case.get('evidence_deadline')\n    if evidence_deadline:\n        try:\n            deadline = datetime.datetime.fromisoformat(evidence_deadline.replace('Z', '+00:00'))\n            remaining = (deadline - now).total_seconds() / 3600\n            if remaining < 0:\n                alerts.append({\n                    'case_id': case_id,\n                    'type': 'evidence_overdue',\n                    'deadline': evidence_deadline,\n                    'remaining_hours': round(remaining, 1),\n                    'message': '\u8bc1\u636e\u63d0\u4ea4\u5df2\u8d85\u65f6'\n                })\n            elif remaining <= 24:\n                alerts.append({\n                    'case_id': case_id,\n                    'type': 'evidence_urgent',\n                    'deadline': evidence_deadline,\n                    'remaining_hours': round(remaining, 1),\n                    'message': f'\u8bc1\u636e\u63d0\u4ea4\u622a\u6b62\u5269\u4f59 {round(remaining)}h'\n                })\n        except:\n            pass\n    \n    # \u7533\u8bc9\u7a97\u53e3 21 \u5929\n    appeal_deadline = case.get('appeal_deadline')\n    if appeal_deadline:\n        try:\n            deadline = datetime.datetime.fromisoformat(appeal_deadline.replace('Z', '+00:00'))\n            remaining = (deadline - now).total_seconds() / 3600 / 24\n            if remaining < 0:\n                alerts.append({\n                    'case_id': case_id,\n                    'type': 'appeal_overdue',\n                    'deadline': appeal_deadline,\n                    'remaining_days': round(remaining, 1),\n                    'message': '\u7533\u8bc9\u7a97\u53e3\u5df2\u5173\u95ed'\n                })\n            elif remaining <= 7:\n                alerts.append({\n                    'case_id': case_id,\n                    'type': 'appeal_warning',\n                    'deadline': appeal_deadline,\n                    'remaining_days': round(remaining, 1),\n                    'message': f'\u7533\u8bc9\u7a97\u53e3\u5269\u4f59 {round(remaining)} \u5929'\n                })\n        except:\n            pass\n    \n    # \u521d\u59cb\u552e\u540e 4 \u4e2a\u5de5\u4f5c\u65e5\u54cd\u5e94\n    response_deadline = case.get('response_deadline')\n    if response_deadline and status in ['open', 'pending']:\n        try:\n            deadline = datetime.datetime.fromisoformat(response_deadline.replace('Z', '+00:00'))\n            remaining = (deadline - now).total_seconds() / 3600\n            if remaining <= 24:\n                alerts.append({\n                    'case_id': case_id,\n                    'type': 'response_urgent',\n                    'deadline': response_deadline,\n                    'remaining_hours': round(remaining, 1),\n                    'message': f'\u552e\u540e\u54cd\u5e94\u5269\u4f59 {round(remaining)}h'\n                })\n        except:\n            pass\n\nalerts.sort(key=lambda x: x.get('remaining_hours', 999))\nreturn alerts"
       }
     },
     {
       "id": "2ab9eb14-733b-4561-b37c-5edb5907e6c0",
-      "name": "同步告警到 TK-SaaS",
+      "name": "\u540c\u6b65\u544a\u8b66\u5230 TK-SaaS",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 3,
       "position": [
@@ -82,33 +82,33 @@
     }
   ],
   "connections": {
-    "每4小时触发": {
+    "\u6bcf4\u5c0f\u65f6\u89e6\u53d1": {
       "main": [
         [
           {
-            "node": "获取售后工单",
+            "node": "\u83b7\u53d6\u552e\u540e\u5de5\u5355",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "获取售后工单": {
+    "\u83b7\u53d6\u552e\u540e\u5de5\u5355": {
       "main": [
         [
           {
-            "node": "检查截止时间",
+            "node": "\u68c0\u67e5\u622a\u6b62\u65f6\u95f4",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "检查截止时间": {
+    "\u68c0\u67e5\u622a\u6b62\u65f6\u95f4": {
       "main": [
         [
           {
-            "node": "同步告警到 TK-SaaS",
+            "node": "\u540c\u6b65\u544a\u8b66\u5230 TK-SaaS",
             "type": "main",
             "index": 0
           }
@@ -118,7 +118,5 @@
   },
   "settings": {},
   "staticData": null,
-  "tags": [],
-  "id": "b4996de7-fde0-4334-bc0b-7e3a8ae19f9c",
-  "versionId": "2480995a-5f78-46e1-a9ae-50ad6c4c4ff4"
+  "active": false
 }
