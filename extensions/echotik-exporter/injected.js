@@ -92,6 +92,13 @@
         }
 
         const json = await response.json();
+
+        if (json && json.code === 50001) {
+          sendComplete(`EchoTik 会员限制：${json.msg || '已超出该功能使用限制'}。请升级会员或减少采集页数。`);
+          console.error('[EchoTik Exporter] membership limit:', json);
+          break;
+        }
+
         if (json && Array.isArray(json.data)) {
           let pageNew = 0;
           let pageDup = 0;

@@ -16,11 +16,18 @@
 
 .echotik-export-header {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 14px 16px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
   background: linear-gradient(135deg, #0b8f86 0%, #0d9488 100%);
   color: #ffffff;
+}
+
+.echotik-export-header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
 .echotik-export-header strong {
@@ -31,6 +38,42 @@
 .echotik-export-count {
   font-size: 12px;
   opacity: 0.92;
+}
+
+.echotik-export-hide {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.echotik-export-hide:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.echotik-export-minibtn {
+  position: fixed;
+  top: 100px;
+  right: 0;
+  z-index: 999999;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 8px 0 0 8px;
+  background: #0b8f86;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(21, 34, 33, 0.15);
 }
 
 .echotik-export-body {

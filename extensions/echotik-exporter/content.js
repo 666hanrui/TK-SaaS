@@ -185,12 +185,18 @@
   function createPanel() {
     if (panel) return;
 
+    const existing = document.querySelector('.echotik-export-panel, .echotik-export-minibtn');
+    if (existing) existing.remove();
+
     panel = document.createElement('div');
     panel.className = 'echotik-export-panel';
     panel.innerHTML = `
       <div class="echotik-export-header">
-        <strong>EchoTik 导出助手</strong>
-        <span class="echotik-export-count">已捕获 0 条</span>
+        <div>
+          <strong>EchoTik 导出助手</strong>
+          <span class="echotik-export-count">已捕获 0 条</span>
+        </div>
+        <button class="echotik-export-hide" data-action="hide" title="隐藏面板">−</button>
       </div>
       <div class="echotik-export-body">
         <button class="echotik-export-btn" data-action="clear">清空</button>
@@ -209,8 +215,29 @@
     updatePanel();
   }
 
+  function createMiniButton() {
+    const mini = document.createElement('button');
+    mini.className = 'echotik-export-minibtn';
+    mini.textContent = '导出';
+    mini.title = '显示 EchoTik 导出助手';
+    mini.addEventListener('click', () => {
+      mini.remove();
+      createPanel();
+    });
+    document.body.appendChild(mini);
+  }
+
   function handleAction(event) {
     const action = event.target.dataset.action;
+
+    if (action === 'hide') {
+      if (panel) {
+        panel.remove();
+        panel = null;
+      }
+      createMiniButton();
+      return;
+    }
 
     if (action === 'clear') {
       captured = [];
