@@ -44,6 +44,14 @@
 
   function normalizeValue(value) {
     if (value === null || value === undefined || value === 'N/A') return '';
+    if (typeof value === 'object') {
+      if (Array.isArray(value)) return value.map(normalizeValue).join(', ');
+      if (value.name !== undefined) return String(value.name).trim();
+      if (value.label !== undefined) return String(value.label).trim();
+      if (value.value !== undefined) return String(value.value).trim();
+      if (value.id !== undefined) return String(value.id).trim();
+      return JSON.stringify(value);
+    }
     return String(value).trim();
   }
 
