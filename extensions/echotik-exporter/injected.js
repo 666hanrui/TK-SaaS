@@ -92,7 +92,7 @@
         }
 
         const json = await response.json();
-        if (json && json.code === 0 && Array.isArray(json.data)) {
+        if (json && Array.isArray(json.data)) {
           let pageNew = 0;
           let pageDup = 0;
           for (const item of json.data) {
@@ -109,7 +109,7 @@
 
           sendToExtension(json.data);
           sendProgress(`第 ${page} 页: ${json.data.length} 条（新增 ${pageNew} / 重复 ${pageDup}）`);
-          console.log(`[EchoTik Exporter] page ${page} total=${json.data.length} new=${pageNew} dup=${pageDup}`);
+          console.log(`[EchoTik Exporter] page ${page} total=${json.data.length} new=${pageNew} dup=${pageDup} code=${json.code}`);
 
           if (json.data.length === 0) {
             sendComplete(`第 ${page} 页无数据，自动采集结束。累计新增 ${totalNew} 条，重复 ${totalDup} 条。`);
@@ -147,17 +147,17 @@
   window.fetch = async function (...args) {
     const response = await originalFetch.apply(this, args);
     const url = args[0];
-    if (typeof url === 'string' && url.includes('/api/v1/data/influencers?')) {
-      try {
-        const clone = response.clone();
-        const json = await clone.json();
-        if (json && json.code === 0 && Array.isArray(json.data)) {
-          sendToExtension(json.data);
+        if (typeof url === 'string' && url.includes('/api/v1/data/influencers?')) {
+          try {
+            const clone = response.clone();
+            const json = await clone.json();
+            if (json && Array.isArray(json.data)) {
+              sendToExtension(json.data);
+            }
+          } catch (e) {
+            // ignore
+          }
         }
-      } catch (e) {
-        // ignore
-      }
-    }
     return response;
   };
 
@@ -171,16 +171,16 @@
 
   XMLHttpRequest.prototype.send = function (...args) {
     this.addEventListener('load', function () {
-      if (typeof this._url === 'string' && this._url.includes('/api/v1/data/influencers?')) {
-        try {
-          const json = JSON.parse(this.responseText);
-          if (json && json.code === 0 && Array.isArray(json.data)) {
-            sendToExtension(json.data);
+        if (typeof this._url === 'string' && this._url.includes('/api/v1/data/influencers?')) {
+          try {
+            const json = JSON.parse(this.responseText);
+            if (json && Array.isArray(json.data)) {
+              sendToExtension(json.data);
+            }
+          } catch (e) {
+            // ignore
           }
-        } catch (e) {
-          // ignore
         }
-      }
     });
     return originalSend.apply(this, args);
   };
