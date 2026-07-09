@@ -40,6 +40,14 @@ export function buildCreatorAutomationPayload(creator, options = {}) {
   const confirmedAt = options.confirmedAt || creator.automation?.outreach?.confirmedAt;
   const confirmedBy = options.confirmedBy || creator.automation?.outreach?.confirmedBy;
   const draft = options.draft || creator.automation?.outreach?.draft || "";
+  const socialAccount = cleanText(creator.contact?.socialAccount).toLowerCase();
+  const channel =
+    options.channel ||
+    (creator.contact?.email
+      ? "email"
+      : creator.contact?.instagram || socialAccount.includes("instagram")
+        ? "instagram"
+        : "manual");
   const recentVideos = (creator.recentVideos ?? []).slice(0, 10).map((video) =>
     compactObject({
       id: video.id,
@@ -59,6 +67,7 @@ export function buildCreatorAutomationPayload(creator, options = {}) {
   return {
     action,
     allowSend: Boolean(isRecordSentAction && options.allowSend && confirmedAt),
+    channel,
     dryRun: isRecordSentAction ? false : options.dryRun !== false,
     requestedAt: options.requestedAt || new Date().toISOString(),
     source: "tk-saas-web",
@@ -68,6 +77,7 @@ export function buildCreatorAutomationPayload(creator, options = {}) {
     }),
     message: compactObject({
       draft,
+      subject: options.subject,
     }),
     creator: compactObject({
       id: creator.id,
@@ -149,6 +159,7 @@ export function applyCreatorAutomationResult(creators, creatorId, result) {
       confirmedAt: result.confirmedAt ?? previousOutreach.confirmedAt,
       confirmedBy: result.confirmedBy ?? previousOutreach.confirmedBy,
       sentAt: result.sentAt ?? previousOutreach.sentAt,
+      chatwoot: result.chatwoot ?? previousOutreach.chatwoot,
       requestedAt: result.requestedAt ?? previousOutreach.requestedAt,
       updatedAt: result.updatedAt ?? new Date().toISOString(),
       dryRun: result.dryRun !== false,
@@ -160,6 +171,7 @@ export function applyCreatorAutomationResult(creators, creatorId, result) {
           status: result.status ?? "queued",
           source: result.source,
           message: result.message,
+          chatwoot: result.chatwoot,
           confirmedAt: result.confirmedAt,
           sentAt: result.sentAt,
           updatedAt: result.updatedAt ?? new Date().toISOString(),

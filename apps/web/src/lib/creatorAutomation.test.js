@@ -124,15 +124,18 @@ describe("creator outreach automation", () => {
     const payload = buildCreatorAutomationPayload(creator, {
       action: "record_sent",
       allowSend: true,
+      channel: "email",
       confirmedAt: "2026-07-07T10:05:00.000Z",
       confirmedBy: "operator",
       draft: "Approved draft",
       requestedAt: "2026-07-07T10:06:00.000Z",
+      subject: "Collaboration with house of foils",
     });
 
     expect(payload).toMatchObject({
       action: "record_sent",
       allowSend: true,
+      channel: "email",
       dryRun: false,
       confirmation: {
         confirmedAt: "2026-07-07T10:05:00.000Z",
@@ -140,8 +143,32 @@ describe("creator outreach automation", () => {
       },
       message: {
         draft: "Approved draft",
+        subject: "Collaboration with house of foils",
       },
     });
+  });
+
+  it("uses instagram as the send channel when only a public social account is available", () => {
+    const payload = buildCreatorAutomationPayload(
+      {
+        ...creator,
+        contact: {
+          email: "",
+          instagram: "",
+          socialAccount: "Instagram: https://www.instagram.com/houseof.foils",
+        },
+      },
+      {
+        action: "record_sent",
+        allowSend: true,
+        confirmedAt: "2026-07-07T10:05:00.000Z",
+        confirmedBy: "operator",
+        draft: "Approved IG draft",
+      },
+    );
+
+    expect(payload.channel).toBe("instagram");
+    expect(payload.allowSend).toBe(true);
   });
 
   it("records human confirmation and sent status in the creator CRM history", () => {
@@ -184,5 +211,26 @@ describe("creator outreach automation", () => {
       "confirmed",
       "sent",
     ]);
+  });
+
+  it("stores Chatwoot follow-up metadata from automation results", () => {
+    const updated = applyCreatorAutomationResult([{ ...creator }], creator.id, {
+      queueId: "queue-chatwoot",
+      status: "sent",
+      source: "manual-send-record",
+      crmStatus: "contacted",
+      chatwoot: {
+        contactId: 42,
+        labels: ["creator-outreach", "sample-pending"],
+        nextStep: "sample_followup",
+      },
+      updatedAt: "2026-07-07T10:10:00.000Z",
+    });
+
+    expect(updated[0].automation.outreach.chatwoot).toEqual({
+      contactId: 42,
+      labels: ["creator-outreach", "sample-pending"],
+      nextStep: "sample_followup",
+    });
   });
 });

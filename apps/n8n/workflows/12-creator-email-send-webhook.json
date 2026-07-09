@@ -1,0 +1,163 @@
+{
+  "name": "达人邮件发送 - Creator Email Send Webhook",
+  "nodes": [
+    {
+      "id": "creator-email-webhook",
+      "name": "Webhook 接收达人邮件发送",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "webhookId": "creator-email-send",
+      "parameters": {
+        "path": "creator-email-send",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "validate-email-send",
+      "name": "校验人工确认和SMTP配置",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst body = input.body || input;\nconst env = $env || {};\nconst now = new Date().toISOString();\nconst creator = body.creator || {};\nconst contact = creator.contact || {};\nconst message = body.message || {};\nconst confirmation = body.confirmation || {};\nfunction clean(value) { return String(value ?? '').trim(); }\nfunction fail(status, text) { return [{ json: { ok: false, readyToSend: false, queueId: body.queueId || '', status, source: 'n8n-email-send', crmStatus: 'ready_to_contact', dryRun: true, allowSend: false, message: text, updatedAt: now } }]; }\n\nif (body.action !== 'record_sent') {\n  return fail('blocked', 'Only record_sent requests can enter the email send workflow.');\n}\nif (body.allowSend !== true || body.dryRun !== false) {\n  return fail('blocked', 'Email sending requires allowSend=true and dryRun=false after human confirmation.');\n}\nif (!confirmation.confirmedAt) {\n  return fail('blocked', 'Human confirmation timestamp is required before sending.');\n}\nif (!clean(contact.email)) {\n  return fail('needs_email', 'Creator email is missing. Add a public email before using SMTP send.');\n}\nif (!clean(message.draft)) {\n  return fail('needs_message', 'Approved outreach draft is missing.');\n}\nif (env.CREATOR_EMAIL_SEND_ENABLED !== 'true') {\n  return fail('needs_smtp_config', 'SMTP send is not enabled. Configure an n8n SMTP credential, set CREATOR_EMAIL_SEND_ENABLED=true, and set CREATOR_OUTREACH_FROM_EMAIL.');\n}\n\nconst displayName = clean(creator.displayName) || clean(creator.handle).replace(/^@/, '') || 'creator';\nreturn [{\n  json: {\n    ok: true,\n    readyToSend: true,\n    queueId: body.queueId || '',\n    status: 'ready_to_send',\n    source: 'n8n-email-send',\n    crmStatus: 'ready_to_contact',\n    dryRun: false,\n    allowSend: true,\n    creatorId: creator.id || '',\n    creatorHandle: clean(creator.handle).replace(/^@/, ''),\n    fromEmail: clean(env.CREATOR_OUTREACH_FROM_EMAIL || env.SMTP_FROM_EMAIL) || 'pr@tk-saas.local',\n    toEmail: clean(contact.email),\n    subject: clean(message.subject) || `Collaboration with ${displayName}`,\n    text: clean(message.draft),\n    confirmedAt: confirmation.confirmedAt,\n    confirmedBy: confirmation.confirmedBy || 'operator',\n    updatedAt: now,\n  },\n}];"
+      }
+    },
+    {
+      "id": "smtp-ready-if",
+      "name": "SMTP 已启用？",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        740,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.readyToSend }}",
+              "value2": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "send-email",
+      "name": "EmailSend 发送达人邮件",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [
+        1000,
+        220
+      ],
+      "parameters": {
+        "fromEmail": "={{ $json.fromEmail }}",
+        "toEmail": "={{ $json.toEmail }}",
+        "subject": "={{ $json.subject }}",
+        "text": "={{ $json.text }}"
+      }
+    },
+    {
+      "id": "mark-email-sent",
+      "name": "标记邮件已发送",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1240,
+        220
+      ],
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nreturn [{ json: { ...item, ok: true, readyToSend: true, status: 'sent', source: 'n8n-email-send', crmStatus: 'contacted', sentAt: new Date().toISOString(), dryRun: false, allowSend: true, message: 'SMTP EmailSend completed.' } }];"
+      }
+    },
+    {
+      "id": "respond-email",
+      "name": "返回邮件发送结果",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        300
+      ],
+      "parameters": {
+        "respondWith": "firstIncomingItem"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook 接收达人邮件发送": {
+      "main": [
+        [
+          {
+            "node": "校验人工确认和SMTP配置",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "校验人工确认和SMTP配置": {
+      "main": [
+        [
+          {
+            "node": "SMTP 已启用？",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SMTP 已启用？": {
+      "main": [
+        [
+          {
+            "node": "EmailSend 发送达人邮件",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "返回邮件发送结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EmailSend 发送达人邮件": {
+      "main": [
+        [
+          {
+            "node": "标记邮件已发送",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "标记邮件已发送": {
+      "main": [
+        [
+          {
+            "node": "返回邮件发送结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {},
+  "active": false
+}

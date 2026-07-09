@@ -1302,6 +1302,14 @@ function CreatorDetailDrawer({
             <Field label="队列 ID" value={outreach?.queueId || "--"} />
             <Field label="确认时间" value={outreach?.confirmedAt ? formatShortDate(outreach.confirmedAt) : "--"} />
             <Field label="发送回写" value={outreach?.sentAt ? formatShortDate(outreach.sentAt) : "--"} />
+            <Field
+              label="Chatwoot"
+              value={
+                outreach?.chatwoot?.contactId
+                  ? `Contact #${outreach.chatwoot.contactId}`
+                  : outreach?.chatwoot?.status || "--"
+              }
+            />
             <Field label="更新时间" value={outreach?.updatedAt ? formatShortDate(outreach.updatedAt) : "--"} />
           </div>
           {outreach?.draft ? (
@@ -1821,10 +1829,12 @@ export function App() {
     const payload = buildCreatorAutomationPayload(creator, {
       action: "record_sent",
       allowSend: true,
+      channel: creator.contact?.email ? "email" : creator.contact?.instagram ? "instagram" : "manual",
       requestedAt,
       confirmedAt: outreach.confirmedAt,
       confirmedBy: outreach.confirmedBy || "operator",
       draft: outreach.draft,
+      subject: `Collaboration with ${creator.displayName || creator.handle || "your content"}`,
     });
 
     await submitCreatorAutomationAction(

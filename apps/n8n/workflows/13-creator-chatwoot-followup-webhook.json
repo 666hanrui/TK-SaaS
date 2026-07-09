@@ -1,0 +1,74 @@
+{
+  "name": "达人Chatwoot跟进 - Creator Chatwoot Follow-up",
+  "nodes": [
+    {
+      "id": "creator-chatwoot-webhook",
+      "name": "Webhook 接收达人Chatwoot跟进",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "creator-chatwoot-followup",
+      "parameters": {
+        "path": "creator-chatwoot-followup",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "sync-chatwoot",
+      "name": "同步联系人标签备注",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        540,
+        300
+      ],
+      "parameters": {
+        "jsCode": "return (async () => {\n  const input = $input.first().json;\n  const body = input.body || input;\n  const env = $env || {};\n  const https = require('https');\n  const http = require('http');\n  const { URL } = require('url');\n  const now = new Date().toISOString();\n  const creator = body.creator || {};\n  const contact = creator.contact || {};\n  const event = body.event || body.action || 'outreach_sent';\n  const baseUrl = String(env.CHATWOOT_BASE_URL || 'http://localhost:3000').replace(/\\/$/, '');\n  const accountId = env.CHATWOOT_ACCOUNT_ID || '3';\n  const token = env.CHATWOOT_API_TOKEN;\n\n  function clean(value) { return String(value ?? '').trim(); }\n  function compact(record) { return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined && value !== null && value !== '')); }\n  function firstContact(data) {\n    const payload = data?.payload;\n    const list = Array.isArray(payload) ? payload : Array.isArray(payload?.contacts) ? payload.contacts : Array.isArray(data?.contacts) ? data.contacts : Array.isArray(data) ? data : [];\n    const item = list[0] || payload?.contact || data?.contact;\n    return item?.contact || item || null;\n  }\n  function requestJson(targetUrl, options = {}) {\n    return new Promise((resolve, reject) => {\n      const parsedUrl = new URL(targetUrl);\n      const client = parsedUrl.protocol === 'https:' ? https : http;\n      const requestBody = options.body ? String(options.body) : '';\n      const request = client.request(parsedUrl, {\n        method: options.method || 'GET',\n        headers: {\n          ...(options.headers || {}),\n          ...(requestBody ? { 'Content-Length': Buffer.byteLength(requestBody) } : {}),\n        },\n      }, (response) => {\n        let responseBody = '';\n        response.setEncoding('utf8');\n        response.on('data', (chunk) => { responseBody += chunk; });\n        response.on('end', () => {\n          let data = {};\n          try { data = responseBody ? JSON.parse(responseBody) : {}; } catch { data = { raw: responseBody }; }\n          resolve({ statusCode: response.statusCode || 0, data });\n        });\n      });\n      request.on('error', reject);\n      if (requestBody) request.write(requestBody);\n      request.end();\n    });\n  }\n\n  async function chatwoot(method, path, data) {\n    const response = await requestJson(`${baseUrl}/api/v1/accounts/${accountId}${path}`, {\n      method,\n      headers: { 'Content-Type': 'application/json', api_access_token: token },\n      body: data === undefined ? undefined : JSON.stringify(data),\n    });\n    const responseData = response.data || {};\n    if (response.statusCode < 200 || response.statusCode >= 300) {\n      throw new Error(responseData?.message || responseData?.error || `Chatwoot ${method} ${path} failed with HTTP ${response.statusCode}`);\n    }\n    return responseData;\n  }\n\n  if (!token) {\n    return [{ json: { ok: false, status: 'needs_chatwoot_config', source: 'chatwoot', message: 'CHATWOOT_API_TOKEN is not configured in n8n.', updatedAt: now } }];\n  }\n\n  const handle = clean(creator.handle).replace(/^@/, '');\n  const name = clean(creator.displayName) || handle || 'Creator lead';\n  const email = clean(contact.email);\n  const identifier = clean(creator.id || creator.rawId || handle || email);\n  const query = email || identifier || handle || name;\n  if (!query && !identifier) {\n    return [{ json: { ok: false, status: 'needs_creator_identity', source: 'chatwoot', message: 'Creator identity is missing.', updatedAt: now } }];\n  }\n\n  let contactRecord = null;\n  try {\n    const searchResult = await chatwoot('GET', `/contacts/search?q=${encodeURIComponent(query || identifier)}`);\n    contactRecord = firstContact(searchResult);\n  } catch {}\n\n  if (!contactRecord?.id) {\n    const createResult = await chatwoot('POST', '/contacts', compact({\n      name,\n      email: email || undefined,\n      identifier,\n      custom_attributes: compact({\n        creator_id: creator.id,\n        tiktok_handle: handle,\n        tiktok_profile_url: creator.profileUrl,\n        creator_source: creator.source,\n      }),\n    }));\n    contactRecord = firstContact(createResult);\n  }\n\n  if (!contactRecord?.id) {\n    throw new Error('Chatwoot did not return a contact id.');\n  }\n\n  const labels = ['creator-outreach'];\n  if (event === 'outreach_sent') labels.push('creator-contacted');\n  if (event === 'creator_replied') labels.push('creator-replied');\n  if (event === 'sample_requested' || body.outreach?.crmStatus === 'sample_pending') labels.push('sample-pending');\n  if (body.channel) labels.push(`channel-${body.channel}`);\n  const nextStep = event === 'sample_requested' ? 'sample_followup' : event === 'creator_replied' ? 'reply_review' : 'wait_for_reply';\n\n  await chatwoot('PATCH', `/contacts/${contactRecord.id}`, {\n    custom_attributes: compact({\n      creator_id: creator.id,\n      tiktok_handle: handle,\n      tiktok_profile_url: creator.profileUrl,\n      outreach_status: body.outreach?.status || event,\n      outreach_queue_id: body.queueId || body.outreach?.queueId,\n      outreach_sent_at: body.outreach?.sentAt,\n      next_step: nextStep,\n      sample_status: labels.includes('sample-pending') ? 'sample_pending' : undefined,\n      last_creator_event_at: now,\n    }),\n  });\n  await chatwoot('POST', `/contacts/${contactRecord.id}/labels`, { labels });\n\n  const noteLines = [\n    `Creator outreach event: ${event}`,\n    handle ? `TikTok: @${handle}` : '',\n    creator.profileUrl ? `Profile: ${creator.profileUrl}` : '',\n    body.channel ? `Channel: ${body.channel}` : '',\n    body.outreach?.status ? `Outreach status: ${body.outreach.status}` : '',\n    body.message?.subject ? `Subject: ${body.message.subject}` : '',\n    body.message?.draft ? `Draft: ${body.message.draft}` : '',\n    body.reply?.content ? `Reply: ${body.reply.content}` : '',\n    `Next step: ${nextStep}`,\n  ].filter(Boolean).join('\\n');\n  try {\n    await chatwoot('POST', `/contacts/${contactRecord.id}/notes`, { note: { content: noteLines } });\n  } catch {\n    await chatwoot('POST', `/contacts/${contactRecord.id}/notes`, { content: noteLines });\n  }\n\n  let assignmentStatus = 'no_conversation';\n  const conversationId = body.conversationId || body.conversation?.id;\n  if (conversationId && env.CHATWOOT_CREATOR_ASSIGNEE_ID) {\n    await chatwoot('POST', `/conversations/${conversationId}/assignments`, { assignee_id: Number(env.CHATWOOT_CREATOR_ASSIGNEE_ID) });\n    assignmentStatus = 'assigned';\n  }\n\n  return [{ json: { ok: true, status: 'chatwoot_synced', source: 'chatwoot', contactId: contactRecord.id, labels, nextStep, assignmentStatus, updatedAt: now, chatwoot: { status: 'chatwoot_synced', contactId: contactRecord.id, labels, nextStep, assignmentStatus } } }];\n})().catch((error) => [{ json: { ok: false, status: 'chatwoot_failed', source: 'chatwoot', message: error instanceof Error ? error.message : 'Chatwoot sync failed', updatedAt: new Date().toISOString() } }]);"
+      }
+    },
+    {
+      "id": "respond-chatwoot",
+      "name": "返回Chatwoot跟进结果",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        840,
+        300
+      ],
+      "parameters": {
+        "respondWith": "firstIncomingItem"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook 接收达人Chatwoot跟进": {
+      "main": [
+        [
+          {
+            "node": "同步联系人标签备注",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "同步联系人标签备注": {
+      "main": [
+        [
+          {
+            "node": "返回Chatwoot跟进结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {},
+  "active": false
+}

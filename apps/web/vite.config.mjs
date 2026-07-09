@@ -225,6 +225,43 @@ async function writeAutomationQueue(automationDir, queue) {
   );
 }
 
+async function syncCreatorChatwootFollowup(webhookUrl, payload, result) {
+  if (!webhookUrl || payload.action !== "record_sent" || result.status !== "sent") {
+    return undefined;
+  }
+
+  try {
+    const chatwootResult = await postJson(webhookUrl, {
+      event: "outreach_sent",
+      queueId: result.queueId,
+      channel: payload.channel || "manual",
+      creator: payload.creator,
+      confirmation: payload.confirmation,
+      message: payload.message,
+      outreach: {
+        queueId: result.queueId,
+        status: result.status,
+        crmStatus: result.crmStatus,
+        source: result.source,
+        sentAt: result.sentAt,
+        updatedAt: result.updatedAt,
+      },
+    });
+
+    return chatwootResult.chatwoot || {
+      status: chatwootResult.status || "chatwoot_synced",
+      contactId: chatwootResult.contactId,
+      labels: chatwootResult.labels,
+      nextStep: chatwootResult.nextStep,
+    };
+  } catch (error) {
+    return {
+      status: "chatwoot_sync_failed",
+      message: error instanceof Error ? error.message : "Chatwoot sync failed",
+    };
+  }
+}
+
 function creatorAutomationPlugin() {
   return {
     name: "creator-automation",
@@ -322,6 +359,7 @@ function creatorAutomationPlugin() {
 
           const n8nWebhookUrl = process.env.N8N_CREATOR_OUTREACH_WEBHOOK_URL;
           const n8nSendWebhookUrl = process.env.N8N_CREATOR_OUTREACH_SEND_WEBHOOK_URL;
+          const chatwootWebhookUrl = process.env.N8N_CREATOR_CHATWOOT_WEBHOOK_URL;
           let result;
 
           if (action === "confirm") {
@@ -338,13 +376,16 @@ function creatorAutomationPlugin() {
               updatedAt: now,
             };
           } else if (action === "record_sent") {
-            if (n8nSendWebhookUrl) {
+            if (n8nSendWebhookUrl && payload.channel === "email") {
               const n8nResult = await postJson(n8nSendWebhookUrl, {
                 ...payload,
                 queueId,
                 dryRun: false,
                 allowSend: true,
               });
+              if (n8nResult.ok === false) {
+                throw new Error(n8nResult.message || n8nResult.status || "Creator send webhook failed");
+              }
 
               result = {
                 ok: true,
@@ -373,13 +414,14 @@ function creatorAutomationPlugin() {
                 confirmedBy: payload.confirmation?.confirmedBy,
                 sentAt: new Date().toISOString(),
                 draft: payload.message?.draft || "",
-                message: "Human operator confirmed outreach was sent; CRM status recorded.",
+                message: `Human operator confirmed ${payload.channel || "manual"} outreach was sent; CRM status recorded.`,
                 dryRun: false,
                 allowSend: true,
                 updatedAt: new Date().toISOString(),
-                n8nConfigured: false,
+                n8nConfigured: Boolean(n8nSendWebhookUrl),
               };
             }
+            result.chatwoot = await syncCreatorChatwootFollowup(chatwootWebhookUrl, payload, result);
           } else if (n8nWebhookUrl) {
             const n8nResult = await postJson(n8nWebhookUrl, {
               ...payload,
@@ -433,6 +475,7 @@ function creatorAutomationPlugin() {
                   sentAt: result.sentAt,
                   crmStatus: result.crmStatus,
                   n8nConfigured: result.n8nConfigured,
+                  chatwoot: result.chatwoot,
                 }
               : queueEntry,
           );

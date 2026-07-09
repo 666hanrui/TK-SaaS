@@ -1,0 +1,74 @@
+{
+  "name": "达人AI话术统一入口 - Creator AI Message Router",
+  "nodes": [
+    {
+      "id": "creator-ai-webhook",
+      "name": "Webhook 接收达人AI请求",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "creator-ai-message",
+      "parameters": {
+        "path": "creator-ai-message",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "deepseek-router",
+      "name": "DeepSeek 生成或判断话术",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ],
+      "parameters": {
+        "jsCode": "return (async () => {\n  const input = $input.first().json;\n  const body = input.body || input;\n  const creator = body.creator || {};\n  const env = $env || {};\n  const https = require('https');\n  const http = require('http');\n  const { URL } = require('url');\n  const now = new Date().toISOString();\n  const mode = body.mode || (body.action === 'classify_reply' ? 'classify_reply' : 'draft');\n\n  if (body.allowSend === true || body.dryRun === false || body.action === 'record_sent') {\n    return [{ json: { ok: false, status: 'blocked', queueId: body.queueId || '', source: 'creator-ai-router', dryRun: true, allowSend: false, message: 'This AI webhook only creates drafts or classifies replies. It never sends outreach.', updatedAt: now } }];\n  }\n\n  if (!env.DEEPSEEK_API_KEY) {\n    return [{ json: { ok: false, status: 'needs_ai_config', queueId: body.queueId || '', source: 'deepseek', dryRun: true, allowSend: false, message: 'DEEPSEEK_API_KEY is not configured in n8n.', updatedAt: now } }];\n  }\n\n  function clean(value) { return String(value ?? '').trim(); }\n  function compact(record) { return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined && value !== null && value !== '')); }\n  function parseJson(value) {\n    const raw = clean(value).replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();\n    try { return JSON.parse(raw); } catch {}\n    const match = raw.match(/\\{[\\s\\S]*\\}/);\n    if (match) { try { return JSON.parse(match[0]); } catch {} }\n    return {};\n  }\n\n  function requestJson(targetUrl, options = {}) {\n    return new Promise((resolve, reject) => {\n      const parsedUrl = new URL(targetUrl);\n      const client = parsedUrl.protocol === 'https:' ? https : http;\n      const requestBody = options.body ? String(options.body) : '';\n      const request = client.request(parsedUrl, {\n        method: options.method || 'GET',\n        headers: {\n          ...(options.headers || {}),\n          ...(requestBody ? { 'Content-Length': Buffer.byteLength(requestBody) } : {}),\n        },\n      }, (response) => {\n        let responseBody = '';\n        response.setEncoding('utf8');\n        response.on('data', (chunk) => { responseBody += chunk; });\n        response.on('end', () => {\n          let data = {};\n          try { data = responseBody ? JSON.parse(responseBody) : {}; } catch { data = { raw: responseBody }; }\n          resolve({ statusCode: response.statusCode || 0, data });\n        });\n      });\n      request.on('error', reject);\n      if (requestBody) request.write(requestBody);\n      request.end();\n    });\n  }\n\n  const baseUrl = (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\\/$/, '');\n  const model = env.DEEPSEEK_MODEL || 'deepseek-v4-flash';\n  const handle = clean(creator.handle).replace(/^@/, '');\n  const name = clean(creator.displayName) || handle || 'creator';\n  const keywords = Array.isArray(creator.matchedKeywords) ? creator.matchedKeywords.slice(0, 8) : [];\n  const metrics = creator.metrics || {};\n  const evidence = creator.evidence || {};\n  const videos = Array.isArray(evidence.recentVideos) ? evidence.recentVideos.slice(0, 5) : [];\n  const facts = [\n    `Name: ${name}`,\n    handle ? `TikTok: @${handle}` : '',\n    creator.profileUrl ? `Profile: ${creator.profileUrl}` : '',\n    creator.description ? `Bio/description: ${creator.description}` : '',\n    keywords.length ? `Matched keywords: ${keywords.join(', ')}` : '',\n    metrics.followers ? `Followers: ${metrics.followers}` : '',\n    metrics.stableVideoCount !== undefined ? `Recent videos over 1000 views: ${metrics.stableVideoCount}/10` : '',\n    metrics.daysSinceLastPost !== undefined ? `Days since last post: ${metrics.daysSinceLastPost}` : '',\n    metrics.productVideoCount !== undefined ? `Product-associated videos: ${metrics.productVideoCount}` : '',\n    videos.length ? `Recent video evidence: ${videos.map((video) => `${video.title || video.videoId || 'video'} (${video.views || 0} views)`).join('; ')}` : '',\n  ].filter(Boolean).join('\\n');\n\n  const system = 'You are a US creator partnership operator for a Black women hair product seller. Use only facts in the input. Do not invent email, phone, price, guarantees, shipping promises, or previous relationship. For draft mode, return compact JSON with subject and draft. For classify_reply mode, return compact JSON with replyIntent, recommendedNextStep, riskFlags, and shortReason.';\n  const user = mode === 'classify_reply'\n    ? [`Classify this creator reply and choose the next CRM step.`, facts, `Reply text: ${clean(body.reply?.content || body.message?.reply || body.content)}`].join('\\n\\n')\n    : [`Write a first outreach draft for this creator.`, facts, `Offer: free product plus paid collaboration plus commission. Main deliverable: TikTok Shop video for drawstring ponytail, half wig, crochet hair, or braids products. Keep it natural, concise, respectful, and under 140 words. Output JSON only: {\"subject\":\"...\",\"draft\":\"...\"}`].join('\\n\\n');\n\n  try {\n    const response = await requestJson(`${baseUrl}/chat/completions`, {\n      method: 'POST',\n      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.DEEPSEEK_API_KEY}` },\n      body: JSON.stringify({ model, temperature: mode === 'classify_reply' ? 0.2 : 0.7, max_tokens: mode === 'classify_reply' ? 350 : 600, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),\n    });\n    const data = response.data || {};\n    if (response.statusCode < 200 || response.statusCode >= 300) {\n      throw new Error(data?.error?.message || `DeepSeek request failed with HTTP ${response.statusCode}`);\n    }\n    const content = clean(data?.choices?.[0]?.message?.content);\n    const parsed = parseJson(content);\n\n    if (mode === 'classify_reply') {\n      return [{ json: { ok: true, queueId: body.queueId || '', status: 'reply_classified', source: 'deepseek', provider: 'deepseek', model, replyIntent: parsed.replyIntent || parsed.intent || 'needs_review', recommendedNextStep: parsed.recommendedNextStep || 'human_review', riskFlags: parsed.riskFlags || [], shortReason: parsed.shortReason || content, dryRun: true, allowSend: false, updatedAt: now } }];\n    }\n\n    const draft = clean(parsed.draft) || content;\n    const subject = clean(parsed.subject) || `Collaboration with ${name}`;\n    if (!draft) {\n      throw new Error('DeepSeek returned an empty draft.');\n    }\n\n    return [{ json: compact({ ok: true, queueId: body.queueId || '', status: 'draft_ready', source: 'deepseek', provider: 'deepseek', model, subject, draft, message: draft, dryRun: true, allowSend: false, creatorId: creator.id || '', creatorHandle: handle, videosChecked: videos.length, updatedAt: now }) }];\n  } catch (error) {\n    return [{ json: { ok: false, queueId: body.queueId || '', status: 'ai_failed', source: 'deepseek', provider: 'deepseek', model, dryRun: true, allowSend: false, message: error instanceof Error ? error.message : 'DeepSeek request failed', updatedAt: now } }];\n  }\n})();"
+      }
+    },
+    {
+      "id": "respond-ai",
+      "name": "返回AI结果",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        800,
+        300
+      ],
+      "parameters": {
+        "respondWith": "firstIncomingItem"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook 接收达人AI请求": {
+      "main": [
+        [
+          {
+            "node": "DeepSeek 生成或判断话术",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek 生成或判断话术": {
+      "main": [
+        [
+          {
+            "node": "返回AI结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {},
+  "active": false
+}
