@@ -1,0 +1,17 @@
+{
+  "definitionId": "hcrd.inventory.sync",
+  "sourceTaskId": "shadow:hcrd-inventory:<YYYY-MM-DD>:first-page",
+  "entityId": "hcrd-inventory:<仓库>:<YYYY-MM-DD>:first-page",
+  "requestedBy": "store-operations",
+  "target": {
+    "url": "https://<惠程荣达系统>/inventory",
+    "accountId": "<惠程荣达账号别名>",
+    "profileId": "hcrd-<惠程荣达账号别名>"
+  },
+  "input": {
+    "accountId": "<惠程荣达账号别名>",
+    "warehouse": "<仓库编码或名称>",
+    "owner": "<货主编码或名称>",
+    "snapshotWindow": "first-page"
+  }
+}

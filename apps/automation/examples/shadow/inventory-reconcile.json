@@ -1,0 +1,13 @@
+{
+  "hcrdSnapshotId": "<hcrd.inventory.sync-run-id>",
+  "tiktokSnapshotId": "<tiktok.inventory.sync-run-id>",
+  "inTransitSnapshotId": "<hcrd.inventory.sync_in_transit-run-id-or-remove-this-field>",
+  "skuMappingVersion": "<mapping-file-version>",
+  "safetyStockVersion": "<safety-stock-file-version>",
+  "mapping": {
+    "<HCRD-SKU>": "<TikTok-seller-SKU>"
+  },
+  "safetyStock": {
+    "<TikTok-seller-SKU>": 20
+  }
+}

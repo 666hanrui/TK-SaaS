@@ -196,6 +196,45 @@ function createLocalCreatorDraft(creator) {
   ].join("\n");
 }
 
+function cleanDraftText(value) {
+  return String(value ?? "").trim();
+}
+
+function parseDraftJson(value) {
+  const text = cleanDraftText(value)
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```$/i, "")
+    .trim();
+  if (!text) return {};
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
+}
+
+function isUsableCreatorDraft(value) {
+  const text = cleanDraftText(value);
+  if (!text) return false;
+  if (/^\{\s*"[^"]*"\s*:\s*"[^"]*$/s.test(text)) return false;
+  if (text.startsWith("{") && Object.keys(parseDraftJson(text)).length === 0) return false;
+  return true;
+}
+
+function extractCreatorDraft(result) {
+  const candidate =
+    result?.draft ||
+    result?.message ||
+    result?.text ||
+    result?.choices?.[0]?.message?.content ||
+    "";
+  const parsed = parseDraftJson(candidate);
+  const draft = cleanDraftText(parsed.draft || parsed.message || parsed.text || candidate);
+
+  return isUsableCreatorDraft(draft) ? draft : "";
+}
+
 async function readAutomationQueue(queueFile) {
   try {
     const parsed = JSON.parse(await fs.readFile(queueFile, "utf8"));
@@ -429,12 +468,7 @@ function creatorAutomationPlugin() {
               dryRun: true,
               allowSend: false,
             });
-            const draft =
-              n8nResult.draft ||
-              n8nResult.message ||
-              n8nResult.text ||
-              n8nResult?.choices?.[0]?.message?.content ||
-              "";
+            const draft = extractCreatorDraft(n8nResult) || createLocalCreatorDraft(creator);
 
             result = {
               ok: true,

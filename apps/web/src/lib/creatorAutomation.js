@@ -9,6 +9,80 @@ function cleanText(value) {
   return String(value ?? "").trim();
 }
 
+function cleanInstagramCandidate(value) {
+  return cleanText(value).replace(/^[(@\s]+/, "").replace(/[)\],，;；\s]+$/g, "");
+}
+
+function toInstagramProfileUrl(handle) {
+  const cleanHandle = cleanInstagramCandidate(handle).replace(/^@/, "");
+  if (!/^[a-z0-9._]{1,30}$/i.test(cleanHandle)) return "";
+  return `https://www.instagram.com/${cleanHandle}`;
+}
+
+function hasNonInstagramPlatformLabel(value) {
+  return /^\s*(youtube|yt|tiktok|tik\s*tok|facebook|fb|twitter|x|snapchat|pinterest|website|site|email)\s*[:：]/i.test(
+    value,
+  );
+}
+
+function extractInstagramUrl(value, { allowBareHandle = false } = {}) {
+  const text = cleanText(value);
+  if (!text) return "";
+
+  const urlMatch = text.match(/(?:https?:\/\/)?(?:www\.)?instagram\.com\/[^\s,，;；)]+/i);
+  if (urlMatch) {
+    const withProtocol = urlMatch[0].startsWith("http") ? urlMatch[0] : `https://${urlMatch[0]}`;
+    try {
+      const url = new URL(cleanInstagramCandidate(withProtocol));
+      if (!/(^|\.)instagram\.com$/i.test(url.hostname)) return "";
+      const [handle] = url.pathname.split("/").filter(Boolean);
+      const reservedPaths = new Set([
+        "about",
+        "accounts",
+        "developer",
+        "direct",
+        "explore",
+        "p",
+        "privacy",
+        "reel",
+        "reels",
+        "stories",
+        "terms",
+        "tv",
+      ]);
+      if (!handle || reservedPaths.has(handle.toLowerCase())) return "";
+      return toInstagramProfileUrl(decodeURIComponent(handle));
+    } catch {
+      return "";
+    }
+  }
+
+  if (hasNonInstagramPlatformLabel(text)) return "";
+
+  const handleMatch = text.match(/(?:^|[\s,;；，])(?:instagram|ig)\s*[:：]?\s*@?([a-z0-9._]{1,30})(?:\b|$)/i);
+  if (handleMatch) return toInstagramProfileUrl(handleMatch[1]);
+
+  if (allowBareHandle) return toInstagramProfileUrl(text);
+
+  return "";
+}
+
+function extractInstagramSocialUrl(value) {
+  const text = cleanText(value);
+  if (!text) return "";
+
+  const handleMatch = text.match(/(?:^|[\s,;；，])(?:instagram|ig)\s*[:：]?\s*@?([a-z0-9._]{1,30})(?:\b|$)/i);
+  return handleMatch ? toInstagramProfileUrl(handleMatch[1]) : "";
+}
+
+export function getInstagramProfileUrl(creator) {
+  return (
+    extractInstagramUrl(creator?.contact?.instagram, { allowBareHandle: true }) ||
+    extractInstagramUrl(creator?.contact?.socialAccount) ||
+    extractInstagramSocialUrl(creator?.contact?.socialAccount)
+  );
+}
+
 function compactObject(record) {
   return Object.fromEntries(
     Object.entries(record).filter(([, value]) => {
@@ -16,6 +90,37 @@ function compactObject(record) {
       return value !== undefined && value !== null && value !== "";
     }),
   );
+}
+
+function parseJsonText(value) {
+  const text = cleanText(value)
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```$/i, "")
+    .trim();
+  if (!text) return {};
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
+}
+
+function isUsableOutreachDraft(value) {
+  const text = cleanText(value);
+  if (!text) return false;
+  if (/^\{\s*"[^"]*"\s*:\s*"[^"]*$/s.test(text)) return false;
+  if (text.startsWith("{") && Object.keys(parseJsonText(text)).length === 0) return false;
+  return true;
+}
+
+function normalizeOutreachDraft(value) {
+  const text = cleanText(value);
+  const parsed = parseJsonText(text);
+  const parsedDraft = cleanText(parsed.draft || parsed.message || parsed.text);
+  const draft = parsedDraft || text;
+
+  return isUsableOutreachDraft(draft) ? draft : "";
 }
 
 function getVideoUrl(video, creator) {
@@ -40,14 +145,10 @@ export function buildCreatorAutomationPayload(creator, options = {}) {
   const confirmedAt = options.confirmedAt || creator.automation?.outreach?.confirmedAt;
   const confirmedBy = options.confirmedBy || creator.automation?.outreach?.confirmedBy;
   const draft = options.draft || creator.automation?.outreach?.draft || "";
-  const socialAccount = cleanText(creator.contact?.socialAccount).toLowerCase();
+  const instagramUrl = getInstagramProfileUrl(creator);
   const channel =
     options.channel ||
-    (creator.contact?.email
-      ? "email"
-      : creator.contact?.instagram || socialAccount.includes("instagram")
-        ? "instagram"
-        : "manual");
+    (creator.contact?.email ? "email" : instagramUrl ? "instagram" : "manual");
   const recentVideos = (creator.recentVideos ?? []).slice(0, 10).map((video) =>
     compactObject({
       id: video.id,
@@ -92,6 +193,7 @@ export function buildCreatorAutomationPayload(creator, options = {}) {
       contact: compactObject({
         email: creator.contact?.email,
         instagram: creator.contact?.instagram,
+        instagramUrl,
         socialAccount: creator.contact?.socialAccount,
         notes: creator.contact?.notes,
       }),
@@ -141,6 +243,25 @@ export function createLocalOutreachDraft(creator) {
   ].join("\n");
 }
 
+export function normalizeCreatorAutomationState(creator) {
+  const outreach = creator?.automation?.outreach;
+  if (!outreach?.draft) return creator;
+
+  const normalizedDraft = normalizeOutreachDraft(outreach.draft);
+  if (normalizedDraft === outreach.draft) return creator;
+
+  return {
+    ...creator,
+    automation: {
+      ...creator.automation,
+      outreach: {
+        ...outreach,
+        draft: normalizedDraft || (outreach.status === "draft_ready" ? createLocalOutreachDraft(creator) : ""),
+      },
+    },
+  };
+}
+
 export function applyCreatorAutomationResult(creators, creatorId, result) {
   return creators.map((creator) => {
     if (creator.id !== creatorId) {
@@ -149,12 +270,16 @@ export function applyCreatorAutomationResult(creators, creatorId, result) {
 
     const previousOutreach = creator.automation?.outreach ?? {};
     const status = result.status ?? previousOutreach.status ?? "queued";
+    const normalizedDraft = normalizeOutreachDraft(result.draft ?? result.message);
+    const draft =
+      normalizedDraft ||
+      (status === "draft_ready" ? createLocalOutreachDraft(creator) : previousOutreach.draft ?? "");
     const nextOutreach = {
       ...previousOutreach,
       queueId: result.queueId ?? previousOutreach.queueId,
       status,
       source: result.source ?? previousOutreach.source ?? "local",
-      draft: result.draft ?? result.message ?? previousOutreach.draft ?? "",
+      draft,
       error: result.error ?? (["failed", "blocked"].includes(status) ? result.message : "") ?? "",
       confirmedAt: result.confirmedAt ?? previousOutreach.confirmedAt,
       confirmedBy: result.confirmedBy ?? previousOutreach.confirmedBy,

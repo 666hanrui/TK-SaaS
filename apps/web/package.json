@@ -9,15 +9,19 @@
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
     "echotik:login": "node scripts/fetch-echotik-web.mjs --login",
-    "echotik:contacts": "node scripts/fetch-echotik-contacts.mjs"
+    "echotik:contacts": "node scripts/fetch-echotik-contacts.mjs",
+    "stagehand:probe": "node scripts/stagehand-local-probe.mjs"
   },
   "dependencies": {
+    "@browserbasehq/stagehand": "^3.6.0",
     "@vitejs/plugin-react": "5.0.4",
     "lucide-react": "0.468.0",
+    "openai": "^6.45.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "vite": "6.4.2",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "6.6.3",

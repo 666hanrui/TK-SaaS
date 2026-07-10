@@ -59,6 +59,8 @@ import { fetchInfluencerList, fetchInfluencerVideos, mapInfluencerToCreatorLead 
 import {
   applyCreatorAutomationResult,
   buildCreatorAutomationPayload,
+  getInstagramProfileUrl,
+  normalizeCreatorAutomationState,
 } from "./lib/creatorAutomation";
 import realEchoTikCreatorLeads from "./lib/echotikRealSeed.json";
 
@@ -268,9 +270,13 @@ function mapFetchedVideos(videos) {
 }
 
 function mergeRealCreatorLeads(creators) {
-  const current = (Array.isArray(creators) ? creators : []).filter((creator) => !demoCreatorIds.has(creator.id));
+  const current = (Array.isArray(creators) ? creators : [])
+    .filter((creator) => !demoCreatorIds.has(creator.id))
+    .map(normalizeCreatorAutomationState);
   const currentIds = new Set(current.map((creator) => creator.id));
-  const missingRealItems = realEchoTikCreatorLeads.filter((creator) => !currentIds.has(creator.id));
+  const missingRealItems = realEchoTikCreatorLeads
+    .filter((creator) => !currentIds.has(creator.id))
+    .map(normalizeCreatorAutomationState);
 
   return missingRealItems.length > 0 ? [...missingRealItems, ...current] : current;
 }
@@ -399,6 +405,41 @@ function Field({ label, value }) {
       <dd>{value}</dd>
     </div>
   );
+}
+
+async function writeClipboardText(value) {
+  const text = String(value ?? "");
+  if (!text) return false;
+
+  if (navigator.clipboard?.writeText) {
+    try {
+      await Promise.race([
+        navigator.clipboard.writeText(text),
+        new Promise((_, reject) => {
+          window.setTimeout(() => reject(new Error("Clipboard write timed out")), 900);
+        }),
+      ]);
+      return true;
+    } catch {
+      // Fall through to the textarea copy path for browsers with stricter clipboard permissions.
+    }
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0, text.length);
+
+  try {
+    return document.execCommand("copy");
+  } finally {
+    document.body.removeChild(textarea);
+  }
 }
 
 function SelectControl({ label, value, options, onChange }) {
@@ -1126,6 +1167,7 @@ function CreatorDetailDrawer({
   isAutomationRunning,
   onConfirmOutreachDraft,
   onContactChange,
+  onCopyOutreachDraft,
   onQueueOutreachDraft,
   onRecordOutreachSent,
   onStatusChange,
@@ -1142,6 +1184,7 @@ function CreatorDetailDrawer({
 
   const evaluation = evaluateCreatorLead(creator, creatorNow);
   const profileUrl = buildTikTokProfileUrl(creator.profileUrl ?? creator.handle);
+  const instagramUrl = getInstagramProfileUrl(creator);
   const nextStage = getNextCreatorStage(creator.crmStatus);
   const outreach = creator.automation?.outreach;
   const outreachStatus = outreach?.status || "not_started";
@@ -1150,7 +1193,7 @@ function CreatorDetailDrawer({
   const checklist = [
     ["打开 TikTok 主页", Boolean(profileUrl)],
     ["确认公开邮箱", Boolean(creator.contact?.email)],
-    ["确认 Instagram / Linktree", Boolean(creator.contact?.instagram)],
+    ["确认 Instagram / Linktree", Boolean(instagramUrl)],
     ["确认内容符合黑人女性发型类目", evaluation.keywordCount > 0],
     ["确认曾带货 / 商品关联", evaluation.productVideoCount > 0],
   ];
@@ -1209,6 +1252,7 @@ function CreatorDetailDrawer({
             />
             <Field label="带货证据" value={`${evaluation.productVideoCount} 项`} />
             <Field label="社交账号" value={creator.contact?.socialAccount || "--"} />
+            <Field label="Instagram" value={instagramUrl ? "已识别主页链接" : "--"} />
             <Field label="来源" value={creator.source} />
           </dl>
           {creator.sourceDataWarnings?.length ? (
@@ -1259,6 +1303,14 @@ function CreatorDetailDrawer({
               />
             </label>
           </div>
+          {instagramUrl ? (
+            <div className="contact-quick-actions">
+              <a className="inline-automation secondary" href={instagramUrl} rel="noreferrer" target="_blank">
+                <ExternalLink size={16} />
+                打开 Instagram 主页
+              </a>
+            </div>
+          ) : null}
         </section>
 
         <section className="drawer-section">
@@ -1298,6 +1350,7 @@ function CreatorDetailDrawer({
           </div>
           <div className="outreach-status-grid">
             <Field label="执行模式" value="Dry-run 草稿，不自动发送" />
+            <Field label="联系渠道" value={creator.contact?.email ? "Email" : instagramUrl ? "Instagram" : "人工补充"} />
             <Field label="队列来源" value={outreach?.source || "待提交"} />
             <Field label="队列 ID" value={outreach?.queueId || "--"} />
             <Field label="确认时间" value={outreach?.confirmedAt ? formatShortDate(outreach.confirmedAt) : "--"} />
@@ -1319,6 +1372,22 @@ function CreatorDetailDrawer({
           )}
           {outreach?.error ? <p className="outreach-error">{outreach.error}</p> : null}
           <div className="outreach-action-row">
+            {instagramUrl ? (
+              <a className="inline-automation secondary" href={instagramUrl} rel="noreferrer" target="_blank">
+                <ExternalLink size={16} />
+                打开 IG 主页
+              </a>
+            ) : null}
+            {instagramUrl && outreach?.draft ? (
+              <button
+                className="inline-automation secondary"
+                onClick={() => onCopyOutreachDraft(creator.id)}
+                type="button"
+              >
+                <Copy size={16} />
+                复制 IG 草稿
+              </button>
+            ) : null}
             <button
               className="inline-automation"
               disabled={isAutomationRunning}
@@ -1829,7 +1898,7 @@ export function App() {
     const payload = buildCreatorAutomationPayload(creator, {
       action: "record_sent",
       allowSend: true,
-      channel: creator.contact?.email ? "email" : creator.contact?.instagram ? "instagram" : "manual",
+      channel: creator.contact?.email ? "email" : getInstagramProfileUrl(creator) ? "instagram" : "manual",
       requestedAt,
       confirmedAt: outreach.confirmedAt,
       confirmedBy: outreach.confirmedBy || "operator",
@@ -1861,8 +1930,30 @@ export function App() {
   async function copyCreatorHandle(handle) {
     if (!handle) return;
     try {
-      await navigator.clipboard.writeText(`@${handle}`);
-      showToast("已复制 TikTok 账号");
+      if (await writeClipboardText(`@${handle}`)) {
+        showToast("已复制 TikTok 账号");
+      } else {
+        showToast("复制失败", "failed");
+      }
+    } catch {
+      showToast("复制失败", "failed");
+    }
+  }
+
+  async function copyCreatorOutreachDraft(creatorId) {
+    const creator = creatorList.find((item) => item.id === creatorId);
+    const draft = creator?.automation?.outreach?.draft;
+    if (!draft) {
+      showToast("请先生成草稿", "failed");
+      return;
+    }
+
+    try {
+      if (await writeClipboardText(draft)) {
+        showToast("IG 草稿已复制");
+      } else {
+        showToast("复制失败", "failed");
+      }
     } catch {
       showToast("复制失败", "failed");
     }
@@ -2151,6 +2242,7 @@ export function App() {
           isAutomationRunning={creatorAutomationBusyId === selectedCreator?.id}
           onConfirmOutreachDraft={confirmCreatorOutreachDraft}
           onContactChange={updateCreatorContact}
+          onCopyOutreachDraft={copyCreatorOutreachDraft}
           onQueueOutreachDraft={queueCreatorOutreachDraft}
           onRecordOutreachSent={recordCreatorOutreachSent}
           onStatusChange={updateCreatorCrmStatus}

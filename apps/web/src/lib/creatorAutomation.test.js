@@ -3,6 +3,8 @@ import {
   applyCreatorAutomationResult,
   buildCreatorAutomationPayload,
   createLocalOutreachDraft,
+  getInstagramProfileUrl,
+  normalizeCreatorAutomationState,
 } from "./creatorAutomation";
 
 const creator = {
@@ -120,6 +122,39 @@ describe("creator outreach automation", () => {
     expect(originalList[0].automation).toBeUndefined();
   });
 
+  it("falls back to a safe local draft when the AI draft is malformed", () => {
+    const updated = applyCreatorAutomationResult([{ ...creator }], creator.id, {
+      ok: true,
+      queueId: "queue-bad-draft",
+      status: "draft_ready",
+      source: "n8n-webhook",
+      draft: '{\n  "subject": "',
+      dryRun: true,
+      allowSend: false,
+      updatedAt: "2026-07-07T10:01:00.000Z",
+    });
+
+    expect(updated[0].automation.outreach.draft).toContain("Hi house of foils,");
+    expect(updated[0].automation.outreach.draft).toContain("@houseoffoils");
+    expect(updated[0].automation.outreach.draft).not.toBe('{\n  "subject": "');
+  });
+
+  it("repairs malformed stored outreach drafts without dropping the creator", () => {
+    const repaired = normalizeCreatorAutomationState({
+      ...creator,
+      automation: {
+        outreach: {
+          status: "draft_ready",
+          draft: '{\n  "subject": "',
+        },
+      },
+    });
+
+    expect(repaired.id).toBe(creator.id);
+    expect(repaired.automation.outreach.status).toBe("draft_ready");
+    expect(repaired.automation.outreach.draft).toContain("@houseoffoils");
+  });
+
   it("builds an explicit record-sent payload only after human confirmation", () => {
     const payload = buildCreatorAutomationPayload(creator, {
       action: "record_sent",
@@ -168,7 +203,43 @@ describe("creator outreach automation", () => {
     );
 
     expect(payload.channel).toBe("instagram");
+    expect(payload.creator.contact.instagramUrl).toBe("https://www.instagram.com/houseof.foils");
     expect(payload.allowSend).toBe(true);
+  });
+
+  it("does not treat youtube social accounts as instagram handles", () => {
+    const payload = buildCreatorAutomationPayload({
+      ...creator,
+      contact: {
+        email: "",
+        instagram: "",
+        socialAccount: "Youtube: https://www.youtube.com/channel/UCUPxVsYY-YOfF9IBptYC4Nw",
+      },
+    });
+
+    expect(getInstagramProfileUrl(payload.creator)).toBe("");
+    expect(payload.channel).toBe("manual");
+    expect(payload.creator.contact.instagramUrl).toBeUndefined();
+  });
+
+  it("does not treat labeled youtube values in the instagram field as instagram handles", () => {
+    expect(
+      getInstagramProfileUrl({
+        contact: {
+          instagram: "Youtube: https://www.youtube.com/channel/UCUPxVsYY-YOfF9IBptYC4Nw",
+        },
+      }),
+    ).toBe("");
+  });
+
+  it("normalizes public instagram handles into profile urls", () => {
+    expect(
+      getInstagramProfileUrl({
+        contact: {
+          instagram: "@niawigroom",
+        },
+      }),
+    ).toBe("https://www.instagram.com/niawigroom");
   });
 
   it("records human confirmation and sent status in the creator CRM history", () => {

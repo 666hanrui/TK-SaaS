@@ -7,4 +7,5 @@ output/
 .DS_Store
 .env
 *.local
-
+apps/automation/data/
+apps/automation/.env
