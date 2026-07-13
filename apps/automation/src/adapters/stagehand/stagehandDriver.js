@@ -18,6 +18,11 @@ const LIST_OUTPUT_SCHEMA_KEYS = new Set([
   "mail_reply_list",
   "message_list",
 ]);
+const EXTRACTION_SCOPE_PATTERNS = Object.freeze({
+  inventory_list: /(?:tab panel|panel|list|table|grid).*(?:product|inventory)|(?:product|inventory).*(?:tab panel|panel|list|table|grid)/i,
+  order_list: /(?:tab panel|panel|list|table|grid).*(?:order)|(?:order).*(?:tab panel|panel|list|table|grid)/i,
+  aftersales_list: /(?:tab panel|panel|list|table|grid).*(?:after.?sales|return|refund|case)|(?:after.?sales|return|refund|case).*(?:tab panel|panel|list|table|grid)/i,
+});
 
 function readExtractionInstruction(definition) {
   const base = `${definition.extractInstruction}\nReturn only one object matching the requested schema. Never omit required fields.`;
@@ -29,6 +34,20 @@ The top-level object must always contain both "records" and "summary".
 "summary" must always contain "recordsValid", "capturedCount", and "warnings". Set "capturedCount" to records.length.
 If the selected filter visibly has no matching rows, return "records": [], "capturedCount": 0, and "recordsValid": true; set "visibleCount": 0 only when zero is explicitly visible, and add an empty-state warning.
 If the page is still loading or the empty state cannot be verified, return "records": [], "capturedCount": 0, "recordsValid": false, and explain why in "warnings".`;
+}
+
+function readExtractionOptions(definition, observation, timeout) {
+  const scopePattern = EXTRACTION_SCOPE_PATTERNS[definition.outputSchemaKey];
+  const observedScope = scopePattern
+    ? observation?.candidates?.find(
+        (candidate) => candidate.selector && scopePattern.test(String(candidate.description || "")),
+      )?.selector
+    : undefined;
+
+  return {
+    timeout,
+    ...(observedScope ? { selector: observedScope } : LIST_OUTPUT_SCHEMA_KEYS.has(definition.outputSchemaKey) ? { selector: "main" } : {}),
+  };
 }
 
 function normalizeCandidate(action, pageFingerprint) {
@@ -153,12 +172,14 @@ export class StagehandAutomationDriver {
     return { screenshot: `page/${phase}.png`, metadata: `page/${phase}.json` };
   }
 
-  async runRead({ definition }) {
+  async runRead({ definition, observation }) {
     const schema = this.schemaRegistry[definition.outputSchemaKey];
     if (!schema) throw new Error(`No extraction schema registered for ${definition.id}`);
-    return this.stagehand.extract(readExtractionInstruction(definition), schema, {
-      timeout: this.config.llm.timeoutMs,
-    });
+    return this.stagehand.extract(
+      readExtractionInstruction(definition),
+      schema,
+      readExtractionOptions(definition, observation, this.config.llm.timeoutMs),
+    );
   }
 
   async runInternal() {
