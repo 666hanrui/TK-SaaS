@@ -77,7 +77,7 @@ test("inventory extraction prefers a deterministic DOM scope and clears it after
   driver.page = {
     async evaluate(_callback, argument) {
       pageEvaluations.push(argument);
-      return typeof argument === "object";
+      return typeof argument === "object" ? { prepared: true, textLength: 1200, rowCount: 4 } : undefined;
     },
   };
   let options;
@@ -94,7 +94,14 @@ test("inventory extraction prefers a deterministic DOM scope and clears it after
       outputSchemaKey: "inventory_list",
       extractInstruction: "Extract visible inventory.",
     },
-    observation: { candidates: [] },
+    observation: {
+      candidates: [
+        {
+          description: "Text input field for searching products by name, ID, or SKU.",
+          selector: "xpath=/html/body/main/div/input",
+        },
+      ],
+    },
   });
 
   assert.equal(options.selector, '[data-tk-saas-extraction-scope="inventory_list"]');
@@ -102,8 +109,38 @@ test("inventory extraction prefers a deterministic DOM scope and clears it after
   assert.deepEqual(pageEvaluations[0], {
     attribute: "data-tk-saas-extraction-scope",
     value: "inventory_list",
+    anchorXPath: "/html/body/main/div/input",
   });
   assert.equal(pageEvaluations[1], "data-tk-saas-extraction-scope");
+});
+
+test("inventory extraction refuses a full-page fallback when deterministic scoping misses", async () => {
+  const driver = new StagehandAutomationDriver({
+    config: { llm: { timeoutMs: 90_000 } },
+    schemaRegistry: { inventory_list: { schema: "inventory-list" } },
+  });
+  driver.page = {
+    async evaluate() {
+      return { prepared: false, reason: "product_search_anchor_not_found" };
+    },
+  };
+  driver.stagehand = {
+    async extract() {
+      assert.fail("extract must not receive an unbounded inventory page");
+    },
+  };
+
+  await assert.rejects(
+    driver.runRead({
+      definition: {
+        id: "tiktok.inventory.sync",
+        outputSchemaKey: "inventory_list",
+        extractInstruction: "Extract visible inventory.",
+      },
+      observation: { candidates: [] },
+    }),
+    /product_search_anchor_not_found/,
+  );
 });
 
 test("detail extraction still requires the requested schema without list-only fields", async () => {

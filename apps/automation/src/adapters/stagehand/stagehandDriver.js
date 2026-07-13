@@ -51,34 +51,48 @@ function readExtractionOptions(definition, observation, timeout) {
   };
 }
 
-async function prepareDeterministicReadScope(page, definition) {
+async function prepareDeterministicReadScope(page, definition, observation) {
   if (!page?.evaluate || definition.outputSchemaKey !== "inventory_list") return undefined;
   const scopeValue = definition.outputSchemaKey;
-  const prepared = await page.evaluate(
-    ({ attribute, value }) => {
+  const searchCandidate = observation?.candidates?.find(
+    (candidate) => candidate.selector && /search.*(?:product|商品).*(?:SKU|ID)|(?:SKU|ID).*search.*(?:product|商品)/i.test(String(candidate.description || "")),
+  );
+  const anchorXPath = String(searchCandidate?.selector || "").replace(/^xpath=/i, "");
+  const scope = await page.evaluate(
+    ({ attribute, value, anchorXPath: requestedAnchorXPath }) => {
       document.querySelectorAll(`[${attribute}]`).forEach((element) => element.removeAttribute(attribute));
-      const anchor = [...document.querySelectorAll("input")].find((input) => {
-        const label = `${input.getAttribute("placeholder") || ""} ${input.getAttribute("aria-label") || ""}`;
-        return /商品|product/i.test(label) && /SKU|ID/i.test(label);
-      });
-      if (!anchor) return false;
+      const xpathAnchor = requestedAnchorXPath
+        ? document.evaluate(requestedAnchorXPath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue
+        : null;
+      const anchor = xpathAnchor || [...document.querySelectorAll("input")].find((input) => {
+          const label = `${input.getAttribute("placeholder") || ""} ${input.getAttribute("aria-label") || ""}`;
+          return /商品|product/i.test(label) && /SKU|ID/i.test(label);
+        });
+      if (!anchor) return { prepared: false, reason: "product_search_anchor_not_found" };
 
       let element = anchor.parentElement;
       while (element && element !== document.body) {
         const text = String(element.innerText || element.textContent || "").replace(/\s+/g, " ").trim();
         const containsInventoryTable = /商品|product/i.test(text) && /状态|status/i.test(text) && /库存|stock|inventory/i.test(text);
         const containsRows = /ID\s*[:：]?\s*\d{5,}/i.test(text) || element.querySelectorAll("[role='row'], tbody tr").length > 1;
-        if (containsInventoryTable && containsRows) {
+        if (containsInventoryTable && (containsRows || text.length >= 800)) {
           element.setAttribute(attribute, value);
-          return true;
+          return {
+            prepared: true,
+            textLength: text.length,
+            rowCount: element.querySelectorAll("[role='row'], tbody tr").length,
+          };
         }
         element = element.parentElement;
       }
-      return false;
+      return { prepared: false, reason: "inventory_table_ancestor_not_found" };
     },
-    { attribute: EXTRACTION_SCOPE_ATTRIBUTE, value: scopeValue },
+    { attribute: EXTRACTION_SCOPE_ATTRIBUTE, value: scopeValue, anchorXPath },
   );
-  return prepared ? `[${EXTRACTION_SCOPE_ATTRIBUTE}="${scopeValue}"]` : undefined;
+  return {
+    selector: scope?.prepared ? `[${EXTRACTION_SCOPE_ATTRIBUTE}="${scopeValue}"]` : undefined,
+    diagnostic: scope,
+  };
 }
 
 async function clearDeterministicReadScope(page) {
@@ -213,9 +227,15 @@ export class StagehandAutomationDriver {
   async runRead({ definition, observation }) {
     const schema = this.schemaRegistry[definition.outputSchemaKey];
     if (!schema) throw new Error(`No extraction schema registered for ${definition.id}`);
-    const deterministicSelector = await prepareDeterministicReadScope(this.page, definition);
+    const deterministicScope = await prepareDeterministicReadScope(this.page, definition, observation);
+    const deterministicSelector = deterministicScope?.selector;
     const options = readExtractionOptions(definition, observation, this.config.llm.timeoutMs);
     if (deterministicSelector) options.selector = deterministicSelector;
+    if (definition.outputSchemaKey === "inventory_list" && !deterministicSelector && options.selector === "main") {
+      throw new Error(
+        `Inventory extraction scope was not found; refusing full-page extraction: ${JSON.stringify(deterministicScope?.diagnostic || {})}`,
+      );
+    }
     try {
       return await this.stagehand.extract(readExtractionInstruction(definition), schema, options);
     } finally {
