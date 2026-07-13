@@ -127,7 +127,7 @@ async function clearInventoryReadScope(page) {
 function inventoryBatchInstruction(definition, start, end, total) {
   return `${readExtractionInstruction(definition)}
 This is TikTok Shop's dedicated SKU stock page. Extract exactly one record per selected SKU table row, covering rows ${start + 1}-${end} of ${total}.
-Use the visible numeric SKU ID as both "id" and "skuId". Also extract productTitle, variation, totalStock, availableStock, lockedStock, stockAlert, autoRestock, sales30d, forecast30d, recommendedRestock30d, supplyDays, reservedStock, and orderOccupiedStock when visible.
+Use the visible numeric SKU ID as both "id" and "skuId". Every record must include integer totalStock, availableStock, and lockedStock. Also extract productTitle, variation, stockAlert, autoRestock, sales30d, forecast30d, recommendedRestock30d, supplyDays, reservedStock, and orderOccupiedStock when visible.
 The table columns are: SKU, total stock, available, locked, stock alert, auto restock, sales in the last 30 days, forecast for the next 30 days, recommended restock for the next 30 days, supply days, operation, reserved, and order occupied.
 For each record include exactly one concise evidence item whose sourceText contains the visible SKU ID, variation, total stock, available stock, and locked stock. Do not repeat the whole row in multiple evidence items.
 Do not include rows outside this selected batch. The independent Seller SKU is not displayed, so do not invent it.`;
@@ -145,8 +145,12 @@ function mergeInventoryBatches(batchResults, expectedCount) {
       warnings.push(`Batch ${index + 1} rows ${start + 1}-${end}: ${warning}`);
     }
     for (const record of result?.records || []) {
-      if (recordsById.has(record.id)) duplicateIds.add(record.id);
-      else recordsById.set(record.id, record);
+      const sanitizedRecord = {
+        ...record,
+        evidence: (record.evidence || []).map(({ sourceText }) => ({ sourceText })),
+      };
+      if (recordsById.has(sanitizedRecord.id)) duplicateIds.add(sanitizedRecord.id);
+      else recordsById.set(sanitizedRecord.id, sanitizedRecord);
     }
   });
 

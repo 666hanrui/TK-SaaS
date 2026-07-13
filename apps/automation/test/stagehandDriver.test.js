@@ -91,7 +91,14 @@ test("inventory extraction processes the dedicated stock table in bounded SKU ba
       const count = 5;
       const records = Array.from({ length: count }, (_, offset) => {
         const id = String(1_732_000_000_000_000_000n + BigInt(batchIndex * 5 + offset));
-        return { id, skuId: id, evidence: [{ sourceText: `SKU ID: ${id}` }] };
+        return {
+          id,
+          skuId: id,
+          totalStock: 10,
+          availableStock: 9,
+          lockedStock: 1,
+          evidence: [{ sourceText: `SKU ID: ${id}`, sourceSelector: "invented", capturedAt: "2024-01-01T00:00:00Z" }],
+        };
       });
       calls.push({ instruction, options });
       return { records, summary: { recordsValid: true, capturedCount: records.length, warnings: [] } };
@@ -118,6 +125,7 @@ test("inventory extraction processes the dedicated stock table in bounded SKU ba
   assert.equal(calls[0].options.selector, '[data-tk-saas-extraction-scope="inventory_list"]');
   assert.equal(calls[0].options.ignoreSelectors, undefined);
   assert.equal(result.records.length, 25);
+  assert.deepEqual(result.records[0].evidence, [{ sourceText: `SKU ID: ${result.records[0].id}` }]);
   assert.deepEqual(result.summary, {
     recordsValid: true,
     visibleCount: 25,
@@ -156,7 +164,7 @@ test("inventory extraction splits only a malformed batch and preserves exact row
       const end = Number(match[2]);
       const records = Array.from({ length: end - start + 1 }, (_, offset) => {
         const id = String(1_732_000_000_000_000_000n + BigInt(start + offset));
-        return { id, evidence: [{ sourceText: `SKU ID: ${id}` }] };
+        return { id, skuId: id, totalStock: 5, availableStock: 5, lockedStock: 0, evidence: [{ sourceText: `SKU ID: ${id}` }] };
       });
       return { records, summary: { recordsValid: true, capturedCount: records.length, warnings: [] } };
     },

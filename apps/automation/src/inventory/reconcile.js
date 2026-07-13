@@ -30,7 +30,7 @@ function recordsFrom(snapshot) {
 function inventoryIndex(snapshot, kind) {
   const index = new Map();
   for (const record of recordsFrom(snapshot)) {
-    const sku = firstText(record, ["sellerSku", "sku", "SKU", "skuCode", "productSku"]);
+    const sku = firstText(record, ["sellerSku", "skuId", "platformSkuId", "sku", "SKU", "skuCode", "productSku"]);
     if (!sku) continue;
     const available =
       kind === "tiktok"

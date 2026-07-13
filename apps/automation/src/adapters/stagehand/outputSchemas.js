@@ -23,6 +23,25 @@ const record = z
 
 const listOutput = z.object({ records: z.array(record), summary });
 
+const inventoryRecord = record.extend({
+  skuId: z.string().min(1),
+  productTitle: z.string().optional(),
+  variation: z.string().optional(),
+  totalStock: z.number().int().nonnegative(),
+  availableStock: z.number().int().nonnegative(),
+  lockedStock: z.number().int().nonnegative(),
+  stockAlert: z.union([z.string(), z.number()]).optional(),
+  autoRestock: z.union([z.string(), z.number(), z.boolean()]).optional(),
+  sales30d: z.union([z.string(), z.number()]).optional(),
+  forecast30d: z.union([z.string(), z.number()]).optional(),
+  recommendedRestock30d: z.union([z.string(), z.number()]).optional(),
+  supplyDays: z.union([z.string(), z.number()]).optional(),
+  reservedStock: z.union([z.string(), z.number()]).optional(),
+  orderOccupiedStock: z.union([z.string(), z.number()]).optional(),
+});
+
+const inventoryListOutput = z.object({ records: z.array(inventoryRecord), summary });
+
 const detailOutput = z
   .object({
     id: z.string().min(1),
@@ -40,7 +59,7 @@ export const stagehandOutputSchemas = Object.freeze({
   evidence_manifest: listOutput,
   review_list: listOutput,
   review_detail: detailOutput,
-  inventory_list: listOutput,
+  inventory_list: inventoryListOutput,
   in_transit_list: listOutput,
   creator_list: listOutput,
   creator_detail: detailOutput,

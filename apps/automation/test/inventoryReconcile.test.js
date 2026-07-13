@@ -17,7 +17,7 @@ test("inventory reconciliation preserves unmapped SKUs and calculates evidence-b
       { sellerSku: "H-NO-MAP", availableStock: 2, evidence: [{ sourceText: "H-NO-MAP 2" }] },
     ]),
     tiktokSnapshot: snapshot("tiktok.inventory.sync", [
-      { sellerSku: "T-1", platformAvailableStock: 3, evidence: [{ sourceText: "T-1 3" }] },
+      { skuId: "T-1", availableStock: 3, evidence: [{ sourceText: "T-1 3" }] },
       { sellerSku: "T-NO-MAP", platformAvailableStock: 1, evidence: [{ sourceText: "T-NO-MAP 1" }] },
     ]),
     inTransitSnapshot: snapshot("hcrd.inventory.sync_in_transit", [
