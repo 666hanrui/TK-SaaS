@@ -139,9 +139,11 @@ function mergeInventoryBatches(batchResults, expectedCount) {
   const warnings = [];
   let batchesValid = true;
 
-  batchResults.forEach((result, index) => {
+  batchResults.forEach(({ result, start, end }, index) => {
     if (result?.summary?.recordsValid !== true) batchesValid = false;
-    for (const warning of result?.summary?.warnings || []) warnings.push(`Batch ${index + 1}: ${warning}`);
+    for (const warning of result?.summary?.warnings || []) {
+      warnings.push(`Batch ${index + 1} rows ${start + 1}-${end}: ${warning}`);
+    }
     for (const record of result?.records || []) {
       if (recordsById.has(record.id)) duplicateIds.add(record.id);
       else recordsById.set(record.id, record);
@@ -286,17 +288,17 @@ export class StagehandAutomationDriver {
     return { screenshot: `page/${phase}.png`, metadata: `page/${phase}.json` };
   }
 
-  async runRead({ definition, observation }) {
+  async runRead({ definition, observation, artifactStore }) {
     const schema = this.schemaRegistry[definition.outputSchemaKey];
     if (!schema) throw new Error(`No extraction schema registered for ${definition.id}`);
     if (definition.outputSchemaKey === "inventory_list") {
-      return this.runInventoryRead({ definition, schema });
+      return this.runInventoryRead({ definition, schema, artifactStore });
     }
     const options = readExtractionOptions(definition, observation, this.config.llm.timeoutMs);
     return this.stagehand.extract(readExtractionInstruction(definition), schema, options);
   }
 
-  async runInventoryRead({ definition, schema }) {
+  async runInventoryRead({ definition, schema, artifactStore }) {
     let scope;
     for (let attempt = 0; attempt < 10; attempt += 1) {
       scope = await prepareInventoryReadScope(this.page);
@@ -310,18 +312,48 @@ export class StagehandAutomationDriver {
 
     const batchResults = [];
     try {
-      for (let start = 0; start < scope.rowCount; start += INVENTORY_BATCH_SIZE) {
-        const end = Math.min(start + INVENTORY_BATCH_SIZE, scope.rowCount);
+      const extractRange = async (start, end) => {
         const selectedCount = await selectInventoryBatch(this.page, start, end);
         if (selectedCount !== end - start) {
           throw new Error(`Inventory batch selection mismatch for rows ${start + 1}-${end}: selected ${selectedCount}.`);
         }
-        batchResults.push(
-          await this.stagehand.extract(inventoryBatchInstruction(definition, start, end, scope.rowCount), schema, {
-            timeout: this.config.llm.timeoutMs,
-            selector: `[${EXTRACTION_SCOPE_ATTRIBUTE}="inventory_list"]`,
-          }),
-        );
+        try {
+          const result = await this.stagehand.extract(
+            inventoryBatchInstruction(definition, start, end, scope.rowCount),
+            schema,
+            {
+              timeout: this.config.llm.timeoutMs,
+              selector: `[${EXTRACTION_SCOPE_ATTRIBUTE}="inventory_list"]`,
+            },
+          );
+          if (artifactStore) {
+            await artifactStore.writeJson(`extraction/inventory-rows-${start + 1}-${end}.json`, {
+              startRow: start + 1,
+              endRow: end,
+              result,
+            }).catch(() => {});
+          }
+          return [{ result, start, end }];
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (artifactStore) {
+            await artifactStore.writeJson(`extraction/inventory-rows-${start + 1}-${end}-error.json`, {
+              startRow: start + 1,
+              endRow: end,
+              error: message,
+            }).catch(() => {});
+          }
+          if (end - start <= 1) {
+            throw new Error(`Inventory extraction failed for row ${start + 1}: ${message}`);
+          }
+          const middle = start + Math.floor((end - start) / 2);
+          return [...(await extractRange(start, middle)), ...(await extractRange(middle, end))];
+        }
+      };
+
+      for (let start = 0; start < scope.rowCount; start += INVENTORY_BATCH_SIZE) {
+        const end = Math.min(start + INVENTORY_BATCH_SIZE, scope.rowCount);
+        batchResults.push(...(await extractRange(start, end)));
       }
       return mergeInventoryBatches(batchResults, scope.rowCount);
     } finally {

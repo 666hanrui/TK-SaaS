@@ -137,7 +137,7 @@ export async function runAutomationTask({
       result =
         definition.executor === "internal"
           ? await driver.runInternal({ task, definition, observation })
-          : await driver.runRead({ task, definition, observation });
+          : await driver.runRead({ task, definition, observation, artifactStore });
       receipt = receiptForRead(task, now);
       task = transitionTask(task, "extracted");
       await event("result_captured", { result, receipt });

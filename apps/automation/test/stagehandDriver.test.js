@@ -50,6 +50,7 @@ test("inventory extraction processes the dedicated stock table in bounded SKU ba
     },
   };
   const calls = [];
+  const artifacts = [];
   driver.stagehand = {
     async extract(instruction, _schema, options) {
       const batchIndex = calls.length;
@@ -69,6 +70,11 @@ test("inventory extraction processes the dedicated stock table in bounded SKU ba
       outputSchemaKey: "inventory_list",
       extractInstruction: "Extract visible inventory.",
     },
+    artifactStore: {
+      async writeJson(path, value) {
+        artifacts.push({ path, value });
+      },
+    },
   });
 
   assert.equal(calls.length, 5);
@@ -85,10 +91,56 @@ test("inventory extraction processes the dedicated stock table in bounded SKU ba
     warnings: [],
   });
   assert.equal(pageEvaluations.filter((value) => value?.startIndex !== undefined).length, 5);
+  assert.equal(artifacts.length, 5);
+  assert.equal(artifacts[0].path, "extraction/inventory-rows-1-5.json");
+  assert.equal(artifacts[4].path, "extraction/inventory-rows-21-25.json");
   assert.deepEqual(pageEvaluations.at(-1), [
     "data-tk-saas-extraction-scope",
     "data-tk-saas-extraction-row",
   ]);
+});
+
+test("inventory extraction splits only a malformed batch and preserves exact row coverage", async () => {
+  const driver = new StagehandAutomationDriver({
+    config: { llm: { timeoutMs: 90_000 } },
+    schemaRegistry: { inventory_list: { schema: "inventory-list" } },
+  });
+  driver.page = {
+    async evaluate(_callback, argument) {
+      if (Array.isArray(argument)) return undefined;
+      if (Object.hasOwn(argument, "startIndex")) return argument.endIndex - argument.startIndex;
+      return { prepared: true, rowCount: 5, textLength: 1_500 };
+    },
+  };
+  const instructions = [];
+  driver.stagehand = {
+    async extract(instruction) {
+      instructions.push(instruction);
+      if (/rows 1-5 of 5/.test(instruction)) throw new SyntaxError("malformed JSON");
+      const match = instruction.match(/rows (\d+)-(\d+) of 5/);
+      const start = Number(match[1]);
+      const end = Number(match[2]);
+      const records = Array.from({ length: end - start + 1 }, (_, offset) => {
+        const id = String(1_732_000_000_000_000_000n + BigInt(start + offset));
+        return { id, evidence: [{ sourceText: `SKU ID: ${id}` }] };
+      });
+      return { records, summary: { recordsValid: true, capturedCount: records.length, warnings: [] } };
+    },
+  };
+
+  const result = await driver.runRead({
+    definition: {
+      id: "tiktok.inventory.sync",
+      outputSchemaKey: "inventory_list",
+      extractInstruction: "Extract visible inventory.",
+    },
+  });
+
+  assert.equal(instructions.length, 3);
+  assert.match(instructions[1], /rows 1-2 of 5/);
+  assert.match(instructions[2], /rows 3-5 of 5/);
+  assert.equal(result.records.length, 5);
+  assert.equal(result.summary.recordsValid, true);
 });
 
 test("inventory extraction refuses to use a non-stock page or an unbounded fallback", async () => {
