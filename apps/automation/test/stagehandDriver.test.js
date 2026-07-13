@@ -97,6 +97,7 @@ test("inventory extraction processes the dedicated stock table in bounded SKU ba
           totalStock: 10,
           availableStock: 9,
           lockedStock: 1,
+          stockAlert: null,
           evidence: [{ sourceText: `SKU ID: ${id}`, sourceSelector: "invented", capturedAt: "2024-01-01T00:00:00Z" }],
         };
       });
@@ -125,6 +126,7 @@ test("inventory extraction processes the dedicated stock table in bounded SKU ba
   assert.equal(calls[0].options.selector, '[data-tk-saas-extraction-scope="inventory_list"]');
   assert.equal(calls[0].options.ignoreSelectors, undefined);
   assert.equal(result.records.length, 25);
+  assert.equal(Object.hasOwn(result.records[0], "stockAlert"), false);
   assert.deepEqual(result.records[0].evidence, [{ sourceText: `SKU ID: ${result.records[0].id}` }]);
   assert.deepEqual(result.summary, {
     recordsValid: true,

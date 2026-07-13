@@ -146,7 +146,7 @@ function mergeInventoryBatches(batchResults, expectedCount) {
     }
     for (const record of result?.records || []) {
       const sanitizedRecord = {
-        ...record,
+        ...Object.fromEntries(Object.entries(record).filter(([, value]) => value !== null)),
         evidence: (record.evidence || []).map(({ sourceText }) => ({ sourceText })),
       };
       if (recordsById.has(sanitizedRecord.id)) duplicateIds.add(sanitizedRecord.id);

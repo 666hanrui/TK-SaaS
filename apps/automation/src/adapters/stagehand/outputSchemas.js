@@ -24,20 +24,21 @@ const record = z
 const listOutput = z.object({ records: z.array(record), summary });
 
 const inventoryRecord = record.extend({
+  evidence: z.array(z.object({ sourceText: z.string().min(1) })).min(1),
   skuId: z.string().min(1),
-  productTitle: z.string().optional(),
-  variation: z.string().optional(),
+  productTitle: z.string().nullable().optional(),
+  variation: z.string().nullable().optional(),
   totalStock: z.number().int().nonnegative(),
   availableStock: z.number().int().nonnegative(),
   lockedStock: z.number().int().nonnegative(),
-  stockAlert: z.union([z.string(), z.number()]).optional(),
-  autoRestock: z.union([z.string(), z.number(), z.boolean()]).optional(),
-  sales30d: z.union([z.string(), z.number()]).optional(),
-  forecast30d: z.union([z.string(), z.number()]).optional(),
-  recommendedRestock30d: z.union([z.string(), z.number()]).optional(),
-  supplyDays: z.union([z.string(), z.number()]).optional(),
-  reservedStock: z.union([z.string(), z.number()]).optional(),
-  orderOccupiedStock: z.union([z.string(), z.number()]).optional(),
+  stockAlert: z.union([z.string(), z.number()]).nullable().optional(),
+  autoRestock: z.union([z.string(), z.number(), z.boolean()]).nullable().optional(),
+  sales30d: z.union([z.string(), z.number()]).nullable().optional(),
+  forecast30d: z.union([z.string(), z.number()]).nullable().optional(),
+  recommendedRestock30d: z.union([z.string(), z.number()]).nullable().optional(),
+  supplyDays: z.union([z.string(), z.number()]).nullable().optional(),
+  reservedStock: z.union([z.string(), z.number()]).nullable().optional(),
+  orderOccupiedStock: z.union([z.string(), z.number()]).nullable().optional(),
 });
 
 const inventoryListOutput = z.object({ records: z.array(inventoryRecord), summary });

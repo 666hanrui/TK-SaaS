@@ -18,6 +18,9 @@ test("inventory schema requires typed SKU stock fields", () => {
         totalStock: 31,
         availableStock: 31,
         lockedStock: 0,
+        stockAlert: null,
+        autoRestock: null,
+        forecast30d: null,
         evidence: [{ sourceText: "SKU ID: 1732365465645322771 | Default | 31 | 31 | 0" }],
       },
     ],
@@ -25,6 +28,7 @@ test("inventory schema requires typed SKU stock fields", () => {
   });
 
   assert.equal(valid.records[0].availableStock, 31);
+  assert.equal(valid.records[0].stockAlert, null);
 
   assert.throws(
     () =>
