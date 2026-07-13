@@ -56,7 +56,7 @@ test("evidence capture preserves direct string extraction on non-HCRD pages", as
   };
   const written = [];
   await driver.captureEvidence({
-    definition: { outputSchemaKey: "inventory_list" },
+    definition: { outputSchemaKey: "order_list" },
     artifactStore: {
       async prepareFile() {
         return "/tmp/evidence.png";
@@ -92,6 +92,14 @@ test("inventory observation uses deterministic page checks without full-page act
     url() {
       return "https://seller.us.tiktokshopglobalselling.com/product/stock?shop_region=US";
     },
+    locator(selector) {
+      assert.equal(selector, "body");
+      return {
+        async innerText() {
+          return "管理库存 Estrella Hair";
+        },
+      };
+    },
   };
 
   const observation = await driver.observe({
@@ -107,7 +115,7 @@ test("inventory observation uses deterministic page checks without full-page act
 
 test("list extraction explicitly defines a verified empty-state result", async () => {
   const driver = new StagehandAutomationDriver({
-    config: { llm: { timeoutMs: 90_000 } },
+    config: { llm: { timeoutMs: 90_000 }, tiktokInventory: { sessionApi: false } },
     schemaRegistry: { order_list: { schema: "order-list" } },
   });
   let call;
@@ -140,7 +148,7 @@ test("list extraction explicitly defines a verified empty-state result", async (
 
 test("inventory extraction processes the dedicated stock table in bounded SKU batches", async () => {
   const driver = new StagehandAutomationDriver({
-    config: { llm: { timeoutMs: 90_000 } },
+    config: { llm: { timeoutMs: 90_000 }, tiktokInventory: { sessionApi: false } },
     schemaRegistry: { inventory_list: { schema: "inventory-list" } },
   });
   const pageEvaluations = [];
@@ -215,7 +223,7 @@ test("inventory extraction processes the dedicated stock table in bounded SKU ba
 
 test("inventory extraction splits only a malformed batch and preserves exact row coverage", async () => {
   const driver = new StagehandAutomationDriver({
-    config: { llm: { timeoutMs: 90_000 } },
+    config: { llm: { timeoutMs: 90_000 }, tiktokInventory: { sessionApi: false } },
     schemaRegistry: { inventory_list: { schema: "inventory-list" } },
   });
   driver.page = {
@@ -258,7 +266,7 @@ test("inventory extraction splits only a malformed batch and preserves exact row
 
 test("inventory extraction refuses to use a non-stock page or an unbounded fallback", async () => {
   const driver = new StagehandAutomationDriver({
-    config: { llm: { timeoutMs: 90_000 } },
+    config: { llm: { timeoutMs: 90_000 }, tiktokInventory: { sessionApi: false } },
     schemaRegistry: { inventory_list: { schema: "inventory-list" } },
   });
   driver.page = {
@@ -370,4 +378,73 @@ test("HCRD inventory uses the session API result and requires a matching multimo
   assert.equal(result.records.length, 1);
   assert.equal(result.visualAudit.ok, true);
   assert.equal(result.summary.recordsValid, true);
+});
+
+test("TikTok inventory uses complete session API data and requires a matching multimodal sample", async () => {
+  const calls = [];
+  const driver = new StagehandAutomationDriver({
+    config: {
+      llm: { timeoutMs: 90_000 },
+      tiktokInventory: {
+        apiPath: "/api/v1/product/stock/sku/list",
+        pageSize: 50,
+        maxPages: 100,
+        sessionApi: true,
+        visualAudit: true,
+      },
+    },
+    async tiktokInventoryReader(options) {
+      calls.push(options);
+      return {
+        records: [{
+          id: "1732365465645322771",
+          skuId: "1732365465645322771",
+          sellerSku: null,
+          productTitle: "Limited Free Bonus",
+          totalStock: 31,
+          availableStock: 31,
+          platformAvailableStock: 31,
+          lockedStock: 0,
+          evidence: [{ sourceText: "TikTok API SKU 1732365465645322771 total 31 available 31 locked 0" }],
+        }],
+        summary: { recordsValid: true, capturedCount: 1, warnings: [], sourceTotalCount: 1 },
+      };
+    },
+    async tiktokVisionAuditor() {
+      return {
+        pageKind: "inventory_list",
+        rows: [{ skuId: "1732365465645322771", totalStock: 31, availableStock: 31, lockedStock: 0 }],
+        warnings: [],
+      };
+    },
+  });
+  driver.page = {};
+  const artifacts = [];
+
+  const result = await driver.runRead({
+    task: {
+      target: {
+        origin: "https://seller.us.tiktokshopglobalselling.com",
+        url: "https://seller.us.tiktokshopglobalselling.com/product/stock?shop_region=US",
+      },
+      input: {},
+    },
+    definition: {
+      id: "tiktok.inventory.sync",
+      outputSchemaKey: "inventory_list",
+      extractInstruction: "Read TikTok inventory.",
+    },
+    artifactStore: {
+      async writeJson(file, value) {
+        artifacts.push({ file, value });
+      },
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].apiPath, "/api/v1/product/stock/sku/list");
+  assert.equal(result.records.length, 1);
+  assert.equal(result.visualAudit.ok, true);
+  assert.equal(result.summary.recordsValid, true);
+  assert.equal(artifacts[0].file, "extraction/tiktok-visual-audit.json");
 });

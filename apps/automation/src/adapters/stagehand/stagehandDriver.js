@@ -10,6 +10,10 @@ import {
   readHcrdInventoryViaSession,
   requestHcrdInventoryPage,
 } from "../../inventory/hcrdSessionInventory.js";
+import {
+  compareTikTokVisualAudit,
+  readTikTokInventoryViaSession,
+} from "../../inventory/tiktokSessionInventory.js";
 
 const LOGIN_PATTERN = /\b(sign in|log in|login|enter password|验证码|登录|验证身份)\b/i;
 const CHALLENGE_PATTERN = /\b(captcha|security check|verify you are human|unusual activity|验证|安全验证|人机验证)\b/i;
@@ -40,6 +44,16 @@ const HCRD_VISUAL_AUDIT_SCHEMA = z.object({
     maxInventoryAge: z.number().int().nonnegative(),
     usableStock: z.number().int().nonnegative(),
     sellableStock: z.number().int().nonnegative(),
+  })).max(5),
+  warnings: z.array(z.string()).default([]),
+});
+const TIKTOK_VISUAL_AUDIT_SCHEMA = z.object({
+  pageKind: z.enum(["inventory_list", "other"]),
+  rows: z.array(z.object({
+    skuId: z.string().min(1),
+    totalStock: z.number().int().nonnegative(),
+    availableStock: z.number().int().nonnegative(),
+    lockedStock: z.number().int().nonnegative(),
   })).max(5),
   warnings: z.array(z.string()).default([]),
 });
@@ -219,6 +233,8 @@ export class StagehandAutomationDriver {
     writeCandidateResolvers = {},
     hcrdInventoryReader = readHcrdInventoryViaSession,
     hcrdVisionAuditor,
+    tiktokInventoryReader = readTikTokInventoryViaSession,
+    tiktokVisionAuditor,
   }) {
     this.config = config;
     this.schemaRegistry = schemaRegistry;
@@ -226,6 +242,8 @@ export class StagehandAutomationDriver {
     this.writeCandidateResolvers = writeCandidateResolvers;
     this.hcrdInventoryReader = hcrdInventoryReader;
     this.hcrdVisionAuditor = hcrdVisionAuditor;
+    this.tiktokInventoryReader = tiktokInventoryReader;
+    this.tiktokVisionAuditor = tiktokVisionAuditor;
     this.stagehand = null;
     this.page = null;
     this.localLlmClient = null;
@@ -340,6 +358,19 @@ export class StagehandAutomationDriver {
         authWaitMs,
       };
     }
+    if (definition.outputSchemaKey === "inventory_list") {
+      const pageText = String(await this.page.locator("body").innerText({ timeout: 10_000 }).catch(() => ""));
+      return {
+        authenticated: !LOGIN_PATTERN.test(pageText),
+        challengeDetected: CHALLENGE_PATTERN.test(pageText),
+        pageFingerprint: await this.pageFingerprint(),
+        pageTextPreview: pageText.slice(0, 4_000),
+        candidates: [],
+        targetOrigin: new URL(this.page.url()).origin,
+        requestedOrigin: task.target.origin,
+        sessionApiCandidate: true,
+      };
+    }
     const pageTextResult = await this.stagehand.extract();
     const pageText = String(pageTextResult?.pageText || pageTextResult || "");
     const pageFingerprint = await this.pageFingerprint();
@@ -384,7 +415,7 @@ export class StagehandAutomationDriver {
     const screenshotPath = await artifactStore.prepareFile(`page/${phase}.png`);
     await this.page.screenshot({ path: screenshotPath, fullPage: false });
     let accessibilityText;
-    if (definition.outputSchemaKey === "hcrd_inventory_list") {
+    if (["hcrd_inventory_list", "inventory_list"].includes(definition.outputSchemaKey)) {
       accessibilityText = String(
         await this.page.locator("body").innerText({ timeout: 10_000 }).catch(() => ""),
       );
@@ -407,6 +438,9 @@ export class StagehandAutomationDriver {
     const schema = this.schemaRegistry[definition.outputSchemaKey];
     if (!schema) throw new Error(`No extraction schema registered for ${definition.id}`);
     if (definition.outputSchemaKey === "inventory_list") {
+      if (this.config.tiktokInventory?.sessionApi !== false) {
+        return this.runTikTokInventorySessionRead({ task, schema, artifactStore });
+      }
       return this.runInventoryRead({ definition, schema, artifactStore });
     }
     if (definition.outputSchemaKey === "hcrd_inventory_list") {
@@ -454,6 +488,29 @@ export class StagehandAutomationDriver {
     return schema.parse(result);
   }
 
+  async runTikTokInventorySessionRead({ task, schema, artifactStore }) {
+    const result = await this.tiktokInventoryReader({
+      page: this.page,
+      apiPath: this.config.tiktokInventory?.apiPath || "/api/v1/product/stock/sku/list",
+      pageSize: task.input.pageSize || this.config.tiktokInventory?.pageSize || 50,
+      maxPages: task.input.maxPages || this.config.tiktokInventory?.maxPages || 100,
+      artifactStore,
+      timeoutMs: this.config.llm.timeoutMs,
+    });
+    if (this.config.tiktokInventory?.visualAudit === false) {
+      result.visualAudit = { ok: true, skipped: true, warnings: ["Visual audit disabled by configuration."] };
+    } else {
+      const audit = await this.auditTikTokInventoryScreenshot();
+      result.visualAudit = compareTikTokVisualAudit(result.records, audit);
+      if (!result.visualAudit.ok) {
+        result.summary.recordsValid = false;
+        result.summary.warnings.push("Multimodal visual audit did not confirm the TikTok session API sample.");
+      }
+    }
+    await artifactStore?.writeJson("extraction/tiktok-visual-audit.json", result.visualAudit).catch(() => {});
+    return schema.parse(result);
+  }
+
   async auditHcrdInventoryScreenshot() {
     if (this.hcrdVisionAuditor) return this.hcrdVisionAuditor({ page: this.page });
     if (!this.localLlmClient) throw new Error("HCRD visual audit requires the configured multimodal model client.");
@@ -484,6 +541,37 @@ Return maxInventoryAge from 最大库龄, usableStock from 可用, and sellableS
       },
     });
     return HCRD_VISUAL_AUDIT_SCHEMA.parse(response.data);
+  }
+
+  async auditTikTokInventoryScreenshot() {
+    if (this.tiktokVisionAuditor) return this.tiktokVisionAuditor({ page: this.page });
+    if (!this.localLlmClient) throw new Error("TikTok visual audit requires the configured multimodal model client.");
+    const buffer = await this.page.screenshot({ type: "jpeg", quality: 85, fullPage: false });
+    const response = await this.localLlmClient.createChatCompletion({
+      retries: 1,
+      options: {
+        messages: [
+          {
+            role: "system",
+            content: "You are a read-only visual auditor. Use only pixels in the supplied screenshot. Never propose or perform an action.",
+          },
+          {
+            role: "user",
+            content: "Determine whether this is TikTok Shop's SKU inventory list. If it is, transcribe up to five clearly visible rows. For each row return the visible SKU ID and the exact values under 总库存, 可用, and 已锁定. Do not use 销量, 销量预测, 建议补货数量, or 可供应天数 as inventory values. Do not guess obscured values.",
+          },
+        ],
+        image: {
+          buffer,
+          description: "Current TikTok Shop SKU inventory screenshot for a read-only API-to-UI consistency audit.",
+        },
+        response_model: {
+          name: "tiktok_inventory_visual_audit",
+          schema: TIKTOK_VISUAL_AUDIT_SCHEMA,
+        },
+        maxOutputTokens: 1_024,
+      },
+    });
+    return TIKTOK_VISUAL_AUDIT_SCHEMA.parse(response.data);
   }
 
   async runInventoryRead({ definition, schema, artifactStore }) {

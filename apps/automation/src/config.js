@@ -169,6 +169,13 @@ export function loadAutomationConfig({ env = process.env, cwd = process.cwd() } 
       username: selectedEnv.HCRD_USERNAME || "",
       password: selectedEnv.HCRD_PASSWORD || "",
     },
+    tiktokInventory: {
+      apiPath: selectedEnv.TIKTOK_INVENTORY_API_PATH || "/api/v1/product/stock/sku/list",
+      pageSize: number(selectedEnv.TIKTOK_INVENTORY_PAGE_SIZE, 50),
+      maxPages: number(selectedEnv.TIKTOK_INVENTORY_MAX_PAGES, 100),
+      sessionApi: boolean(selectedEnv.TIKTOK_INVENTORY_SESSION_API, true),
+      visualAudit: boolean(selectedEnv.TIKTOK_INVENTORY_VISUAL_AUDIT, true),
+    },
   };
 }
 
@@ -234,5 +241,6 @@ export function publicConfigSummary(config) {
       authWaitMs: config.hcrdInventory.authWaitMs,
       credentialsConfigured: Boolean(config.hcrdInventory.username && config.hcrdInventory.password),
     },
+    tiktokInventory: config.tiktokInventory,
   };
 }

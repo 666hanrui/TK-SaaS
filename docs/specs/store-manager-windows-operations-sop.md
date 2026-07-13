@@ -151,7 +151,7 @@ npm run records -- --definition tiktok.aftersales.sync
 |---|---|---|---|
 | TikTok 订单/发货风险 | `tiktok.orders.sync` | `read_detail`、`audit_fulfillment` | 发货提交、客户消息 |
 | TikTok 投诉/退款/售后 | `tiktok.aftersales.sync` | `read_return_tracking`、`collect_evidence` | 退款、拒绝、申诉提交、消息发送 |
-| TikTok SKU 库存 | `tiktok.inventory.sync` | 指定 SKU 再读取 | 保存库存调整 |
+| TikTok SKU 库存 | `tiktok.inventory.sync` | 完整读取 `total_sku_count`，再指定 SKU 细查 | 保存库存调整 |
 | 惠程荣达现货 | `hcrd.inventory.sync` | 用登录 profile 的 JSESSIONID 读取完整 API 分页，并由模型抽查可见行 | 任何库存修改 |
 | 惠程荣达在途 | `hcrd.inventory.sync_in_transit` | 指定入库单据 | 任何单据修改 |
 | TikTok 商品评价 | `tiktok.reviews.sync` | `read_context` | 回复、举报 |
@@ -172,7 +172,7 @@ npm run dispatch -- --file <安全工作目录>/hcrd-inventory-sync.json
 npm run dispatch -- --file <安全工作目录>/hcrd-in-transit-sync.json
 ```
 
-首轮一次只派发一个模块，等待 `monitor` 显示 `queueStatus: completed`，再检查对应源数据快照。TikTok 仍限定一页；HCRD 现货任务会通过 `POST /inventory/inventory/listForClientAction.json` 自动读取完整分页（当前基线为 303 条），模型只抽查屏幕中最多 5 行。不要并行使用同一个 profile；worker 的 profile lease 会拒绝并发复用。
+首轮一次只派发一个模块，等待 `monitor` 显示 `queueStatus: completed`，再检查对应源数据快照。TikTok 库存任务监听页面自身的 `POST /api/v1/product/stock/sku/list` 响应并通过可见分页读取到 `total_sku_count`（当前基线为 345 条）；HCRD 现货任务通过 `POST /inventory/inventory/listForClientAction.json` 自动读取完整分页（当前基线为 303 条）。两者都只让模型抽查当前屏幕中最多 5 行。不要并行使用同一个 profile；worker 的 profile lease 会拒绝并发复用。
 
 HCRD 没有独立开放 API Key。认证仅来自该 Chrome profile 中的 `JSESSIONID`；程序在同源页面内请求接口，不复制、不打印、不写入 `.env`。接口返回 HTML、分页总数不一致或视觉样本不一致时，任务失败且不会生成已验证快照。
 
@@ -181,7 +181,7 @@ HCRD 没有独立开放 API Key。认证仅来自该 Chrome profile 中的 `JSES
 库存核对有三个安全步骤：
 
 1. 分别完成 `hcrd.inventory.sync` 与 `tiktok.inventory.sync`，可选再完成 `hcrd.inventory.sync_in_transit`。
-2. 从 `npm run records` 中取得这三个 snapshot run ID，填入 `examples/shadow/inventory-reconcile.json`；同时填写经过确认的 HCRD SKU → TikTok Seller SKU 映射和安全库存。
+2. 从 `npm run records` 中取得这三个 snapshot run ID，填入 `examples/shadow/inventory-reconcile.json`；同时填写经过确认的 HCRD SKU → TikTok Seller SKU 映射和安全库存。若 TikTok 接口的 `seller_sku` 为空，映射目标必须使用该行的 TikTok `sku_id`。
 3. 从本机执行：
 
 ```bash

@@ -84,3 +84,17 @@ test("HCRD inventory configuration targets the authenticated session API and kee
     password: "test-password",
   });
 });
+
+test("TikTok inventory configuration enables complete session API pagination and visual audit", () => {
+  const config = loadAutomationConfig({
+    cwd: "/tmp/tk-saas-config-test",
+    env: {},
+  });
+  assert.deepEqual(config.tiktokInventory, {
+    apiPath: "/api/v1/product/stock/sku/list",
+    pageSize: 50,
+    maxPages: 100,
+    sessionApi: true,
+    visualAudit: true,
+  });
+});

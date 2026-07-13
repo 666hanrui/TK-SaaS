@@ -81,3 +81,9 @@ HCRD inventory uses the authenticated persistent Chrome profile as its session b
 posts to the same-origin `/inventory/inventory/listForClientAction.json`, paginates the complete
 response, normalizes the 24 source fields, and asks the configured multimodal model to cross-check up
 to five visible rows. It never exports or stores the `JSESSIONID` value.
+
+TikTok inventory uses the same pattern without copying browser credentials. The worker captures each
+visible page response from `/api/v1/product/stock/sku/list` until `total_sku_count` is satisfied,
+normalizes SKU and warehouse quantities, rejects duplicate or incomplete pagination, and asks the
+multimodal model to cross-check up to five visible rows. An empty `seller_sku` is preserved; downstream
+mapping must then use the stable TikTok `sku_id`.
