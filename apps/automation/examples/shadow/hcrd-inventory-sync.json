@@ -1,17 +1,18 @@
 {
   "definitionId": "hcrd.inventory.sync",
-  "sourceTaskId": "shadow:hcrd-inventory:<YYYY-MM-DD>:first-page",
-  "entityId": "hcrd-inventory:<仓库>:<YYYY-MM-DD>:first-page",
+  "sourceTaskId": "shadow:hcrd-inventory:HCNY:<YYYY-MM-DD>:all",
+  "entityId": "hcrd-inventory:HCNY:<YYYY-MM-DD>:all",
   "requestedBy": "store-operations",
   "target": {
-    "url": "https://<惠程荣达系统>/inventory",
+    "url": "http://124.156.202.7:8888/wms-main/inventory/inventory/listForClient.htm",
     "accountId": "<惠程荣达账号别名>",
     "profileId": "hcrd-<惠程荣达账号别名>"
   },
   "input": {
     "accountId": "<惠程荣达账号别名>",
-    "warehouse": "<仓库编码或名称>",
-    "owner": "<货主编码或名称>",
-    "snapshotWindow": "first-page"
+    "warehouse": "HCNY",
+    "owner": "XCGLM",
+    "snapshotWindow": "all",
+    "pageSize": 200
   }
 }

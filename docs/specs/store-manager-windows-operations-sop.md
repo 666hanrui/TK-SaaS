@@ -47,9 +47,16 @@ AUTOMATION_HIGH_RISK_EXECUTION=false
 AUTOMATION_HEADLESS=false
 
 # 必须是准确 origin；TikTok 与惠程荣达分别填入，逗号分隔。
-AUTOMATION_ALLOWED_ORIGINS=https://<TikTok-Seller-origin>,https://<HCRD-origin>
+AUTOMATION_ALLOWED_ORIGINS=https://<TikTok-Seller-origin>,http://124.156.202.7:8888
 TIKTOK_SELLER_BASE_URL=https://<TikTok-Seller-origin>
-HCRD_BASE_URL=https://<HCRD-origin>
+HCRD_BASE_URL=http://124.156.202.7:8888/wms-main
+HCRD_INVENTORY_PATH=/inventory/inventory/listForClientAction.json
+HCRD_INVENTORY_PAGE_SIZE=200
+HCRD_INVENTORY_MAX_PAGES=100
+HCRD_INVENTORY_VISUAL_AUDIT=true
+HCRD_AUTH_WAIT_SECONDS=300
+HCRD_USERNAME=<惠程荣达登录账号>
+HCRD_PASSWORD=<惠程荣达登录密码>
 AUTOMATION_CHROME_EXECUTABLE_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
 
 # 模型和视觉：两条 URL 都是店长电脑 loopback，由 STCP visitor 提供。
@@ -97,8 +104,8 @@ npm run vision:preflight -- --synthetic-safe
 # TikTok Shop
 npm run profile:open -- --profile tiktok-shop-<店铺别名> --url https://<TikTok-Seller-实际入口>
 
-# 惠程荣达
-npm run profile:open -- --profile hcrd-<账号别名> --url https://<HCRD-实际入口>
+# 惠程荣达：登录后必须能看到“库存列表”；JSESSIONID 只留在这个 profile 内。
+npm run profile:open -- --profile hcrd-<账号别名> --url http://124.156.202.7:8888/wms-main/client.htm#
 ```
 
 店长在可见浏览器中手工完成登录、MFA 与安全验证，确认正确店铺/仓库后按 Enter 退出。浏览器 profile 只保存在 `data\profiles\`；不要复制 Cookie、`storageState` 或整个 profile 目录。
@@ -145,7 +152,7 @@ npm run records -- --definition tiktok.aftersales.sync
 | TikTok 订单/发货风险 | `tiktok.orders.sync` | `read_detail`、`audit_fulfillment` | 发货提交、客户消息 |
 | TikTok 投诉/退款/售后 | `tiktok.aftersales.sync` | `read_return_tracking`、`collect_evidence` | 退款、拒绝、申诉提交、消息发送 |
 | TikTok SKU 库存 | `tiktok.inventory.sync` | 指定 SKU 再读取 | 保存库存调整 |
-| 惠程荣达现货 | `hcrd.inventory.sync` | 仓库/SKU 过滤及导出 | 任何库存修改 |
+| 惠程荣达现货 | `hcrd.inventory.sync` | 用登录 profile 的 JSESSIONID 读取完整 API 分页，并由模型抽查可见行 | 任何库存修改 |
 | 惠程荣达在途 | `hcrd.inventory.sync_in_transit` | 指定入库单据 | 任何单据修改 |
 | TikTok 商品评价 | `tiktok.reviews.sync` | `read_context` | 回复、举报 |
 | TikTok 客服 | `tiktok.messages.sync` | `read_context` | 任意消息发送 |
@@ -165,7 +172,9 @@ npm run dispatch -- --file <安全工作目录>/hcrd-inventory-sync.json
 npm run dispatch -- --file <安全工作目录>/hcrd-in-transit-sync.json
 ```
 
-首轮一次只派发一个模块的一页数据，等待 `monitor` 显示 `queueStatus: completed`，再检查对应源数据快照。不要并行使用同一个 profile；worker 的 profile lease 会拒绝并发复用。
+首轮一次只派发一个模块，等待 `monitor` 显示 `queueStatus: completed`，再检查对应源数据快照。TikTok 仍限定一页；HCRD 现货任务会通过 `POST /inventory/inventory/listForClientAction.json` 自动读取完整分页（当前基线为 303 条），模型只抽查屏幕中最多 5 行。不要并行使用同一个 profile；worker 的 profile lease 会拒绝并发复用。
+
+HCRD 没有独立开放 API Key。认证仅来自该 Chrome profile 中的 `JSESSIONID`；程序在同源页面内请求接口，不复制、不打印、不写入 `.env`。接口返回 HTML、分页总数不一致或视觉样本不一致时，任务失败且不会生成已验证快照。
 
 ## 8. 惠程荣达与 TikTok 库存核对
 

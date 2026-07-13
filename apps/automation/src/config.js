@@ -159,6 +159,16 @@ export function loadAutomationConfig({ env = process.env, cwd = process.cwd() } 
       echotik: selectedEnv.ECHOTIK_BASE_URL || "https://echotik.live",
       mail: selectedEnv.MAIL_BASE_URL || "https://mail.google.com",
     },
+    hcrdInventory: {
+      baseUrl: selectedEnv.HCRD_BASE_URL || "",
+      path: selectedEnv.HCRD_INVENTORY_PATH || "/inventory/inventory/listForClientAction.json",
+      pageSize: number(selectedEnv.HCRD_INVENTORY_PAGE_SIZE, 200),
+      maxPages: number(selectedEnv.HCRD_INVENTORY_MAX_PAGES, 100),
+      visualAudit: boolean(selectedEnv.HCRD_INVENTORY_VISUAL_AUDIT, true),
+      authWaitMs: number(selectedEnv.HCRD_AUTH_WAIT_SECONDS, 300) * 1_000,
+      username: selectedEnv.HCRD_USERNAME || "",
+      password: selectedEnv.HCRD_PASSWORD || "",
+    },
   };
 }
 
@@ -215,5 +225,14 @@ export function publicConfigSummary(config) {
     },
     browser: config.browser,
     platformBaseUrls: config.platformBaseUrls,
+    hcrdInventory: {
+      baseUrl: config.hcrdInventory.baseUrl,
+      path: config.hcrdInventory.path,
+      pageSize: config.hcrdInventory.pageSize,
+      maxPages: config.hcrdInventory.maxPages,
+      visualAudit: config.hcrdInventory.visualAudit,
+      authWaitMs: config.hcrdInventory.authWaitMs,
+      credentialsConfigured: Boolean(config.hcrdInventory.username && config.hcrdInventory.password),
+    },
   };
 }

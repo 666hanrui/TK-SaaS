@@ -2,6 +2,75 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { StagehandAutomationDriver } from "../src/adapters/stagehand/stagehandDriver.js";
 
+test("HCRD navigation tolerates a DOM-content timeout only after the target origin is loaded", async () => {
+  const driver = new StagehandAutomationDriver({
+    config: { llm: { timeoutMs: 90_000 } },
+  });
+  let waited = 0;
+  driver.page = {
+    async goto(_url, options) {
+      assert.deepEqual(options, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      throw new Error("page.goto: Timeout 30000ms exceeded");
+    },
+    url() {
+      return "http://124.156.202.7:8888/wms-main/inventory/inventory/listForClient.htm";
+    },
+    async waitForTimeout(milliseconds) {
+      waited += milliseconds;
+    },
+  };
+
+  await driver.navigate({
+    task: {
+      target: {
+        origin: "http://124.156.202.7:8888",
+        url: "http://124.156.202.7:8888/wms-main/inventory/inventory/listForClient.htm",
+      },
+    },
+    definition: { outputSchemaKey: "hcrd_inventory_list" },
+  });
+
+  assert.equal(waited, 1_000);
+});
+
+test("evidence capture preserves direct string extraction on non-HCRD pages", async () => {
+  const driver = new StagehandAutomationDriver({
+    config: { llm: { timeoutMs: 90_000 } },
+  });
+  driver.page = {
+    async screenshot() {},
+    url() {
+      return "https://seller.us.tiktokshopglobalselling.com/product/stock";
+    },
+    async title() {
+      return "TikTok Shop Seller Center";
+    },
+    async evaluate() {
+      return { url: "https://seller.us.tiktokshopglobalselling.com/product/stock", title: "Inventory", headings: [], buttons: [] };
+    },
+  };
+  driver.stagehand = {
+    async extract() {
+      return "direct page text";
+    },
+  };
+  const written = [];
+  await driver.captureEvidence({
+    definition: { outputSchemaKey: "inventory_list" },
+    artifactStore: {
+      async prepareFile() {
+        return "/tmp/evidence.png";
+      },
+      async writeJson(path, value) {
+        written.push({ path, value });
+      },
+    },
+    phase: "before-observe",
+  });
+
+  assert.equal(written[0].value.accessibilityText, "direct page text");
+});
+
 test("inventory observation uses deterministic page checks without full-page action enumeration", async () => {
   const driver = new StagehandAutomationDriver({
     config: { llm: { timeoutMs: 90_000 } },
@@ -239,4 +308,66 @@ test("detail extraction still requires the requested schema without list-only fi
 
   assert.match(instruction, /Never omit required fields/);
   assert.doesNotMatch(instruction, /must always contain both "records" and "summary"/);
+});
+
+test("HCRD inventory uses the session API result and requires a matching multimodal sample", async () => {
+  const endpointCalls = [];
+  const driver = new StagehandAutomationDriver({
+    config: {
+      llm: { timeoutMs: 90_000 },
+      platformBaseUrls: { hcrd: "http://124.156.202.7:8888/wms-main" },
+      hcrdInventory: {
+        baseUrl: "http://124.156.202.7:8888/wms-main",
+        path: "/inventory/inventory/listForClientAction.json",
+        pageSize: 200,
+        maxPages: 100,
+        visualAudit: true,
+      },
+    },
+    async hcrdInventoryReader(options) {
+      endpointCalls.push(options.endpoint);
+      return {
+        records: [{
+          id: "HCNY:XCGLM-GLM005",
+          sellerSku: "XCGLM-GLM005",
+          warehouse: "惠程纽约仓",
+          owner: "XCGLM",
+          totalStock: 4,
+          availableStock: 4,
+          lockedStock: 0,
+          maxInventoryAge: 33,
+          evidence: [{ sourceText: "HCRD API XCGLM-GLM005 4 4 0" }],
+        }],
+        summary: { recordsValid: true, capturedCount: 1, warnings: [] },
+      };
+    },
+    async hcrdVisionAuditor() {
+      return {
+        pageKind: "inventory_list",
+        rows: [{ sellerSku: "XCGLM-GLM005", maxInventoryAge: 33, usableStock: 4, sellableStock: 4 }],
+        warnings: [],
+      };
+    },
+  });
+  driver.page = {};
+
+  const result = await driver.runRead({
+    task: {
+      target: {
+        origin: "http://124.156.202.7:8888",
+        url: "http://124.156.202.7:8888/wms-main/inventory/inventory/listForClient.htm",
+      },
+      input: { warehouse: "HCNY" },
+    },
+    definition: {
+      id: "hcrd.inventory.sync",
+      outputSchemaKey: "hcrd_inventory_list",
+      extractInstruction: "Read HCRD inventory.",
+    },
+  });
+
+  assert.deepEqual(endpointCalls, ["http://124.156.202.7:8888/wms-main/inventory/inventory/listForClientAction.json"]);
+  assert.equal(result.records.length, 1);
+  assert.equal(result.visualAudit.ok, true);
+  assert.equal(result.summary.recordsValid, true);
 });

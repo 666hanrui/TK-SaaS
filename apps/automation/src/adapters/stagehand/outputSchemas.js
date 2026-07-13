@@ -12,7 +12,7 @@ const summary = z.object({
   visibleCount: z.number().int().nonnegative().optional(),
   capturedCount: z.number().int().nonnegative(),
   warnings: z.array(z.string()).default([]),
-});
+}).passthrough();
 
 const record = z
   .object({
@@ -44,16 +44,39 @@ const inventoryRecord = record.extend({
 const inventoryListOutput = z.object({ records: z.array(inventoryRecord), summary });
 
 const hcrdInventoryRecord = record.extend({
-  evidence: z.array(z.object({ sourceText: z.string().min(1) })).min(1),
+  evidence: z.array(sourceEvidence).min(1),
   sellerSku: z.string().min(1),
   warehouse: z.string().min(1),
   owner: z.string().nullable().optional(),
   totalStock: z.number().int().nonnegative(),
   availableStock: z.number().int().nonnegative(),
   lockedStock: z.number().int().nonnegative(),
+  warehouseCode: z.string().nullable().optional(),
+  warehouseId: z.union([z.string(), z.number()]).nullable().optional(),
+  customerId: z.union([z.string(), z.number()]).nullable().optional(),
+  inventoryRecordId: z.union([z.string(), z.number()]).nullable().optional(),
+  barcode: z.string().nullable().optional(),
+  productId: z.union([z.string(), z.number()]).nullable().optional(),
+  productCname: z.string().nullable().optional(),
+  productEname: z.string().nullable().optional(),
+  fieldTitles: z.array(z.unknown()).optional(),
+  frozenStock: z.number().int().nonnegative().optional(),
+  inspectionFrozenStock: z.number().int().nonnegative().optional(),
+  defectiveStock: z.number().int().nonnegative().optional(),
+  onShelfStock: z.number().int().nonnegative().optional(),
+  inTransitStock: z.number().int().nonnegative().optional(),
+  soldStock: z.number().int().nonnegative().optional(),
+  transferStock: z.number().int().nonnegative().optional(),
+  shortageStock: z.number().int().nonnegative().optional(),
+  maxInventoryAge: z.number().int().nonnegative().optional(),
+  earliestOnShelfTime: z.string().nullable().optional(),
 });
 
-const hcrdInventoryListOutput = z.object({ records: z.array(hcrdInventoryRecord), summary });
+const hcrdInventoryListOutput = z.object({
+  records: z.array(hcrdInventoryRecord),
+  summary,
+  visualAudit: z.object({ ok: z.boolean() }).passthrough().optional(),
+});
 
 const detailOutput = z
   .object({

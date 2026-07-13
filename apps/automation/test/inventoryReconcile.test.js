@@ -33,3 +33,20 @@ test("inventory reconciliation preserves unmapped SKUs and calculates evidence-b
   assert.equal(result.summary.unmappedTikTokCount, 1);
   assert.equal(result.summary.recordsValid, true);
 });
+
+test("inventory reconciliation sums the same HCRD seller SKU across warehouse rows", () => {
+  const result = reconcileInventorySnapshots({
+    hcrdSnapshot: snapshot("hcrd.inventory.sync", [
+      { id: "WH-A:H-1", sellerSku: "H-1", availableStock: 5, evidence: [{ sourceText: "WH-A H-1 5" }] },
+      { id: "WH-B:H-1", sellerSku: "H-1", availableStock: 7, evidence: [{ sourceText: "WH-B H-1 7" }] },
+    ]),
+    tiktokSnapshot: snapshot("tiktok.inventory.sync", [
+      { skuId: "T-1", availableStock: 10, evidence: [{ sourceText: "T-1 10" }] },
+    ]),
+    mapping: { "H-1": "T-1" },
+    safetyStock: {},
+  });
+  const mapped = result.records.find(({ status }) => status === "mapped");
+  assert.equal(mapped.hcrdAvailable, 12);
+  assert.equal(mapped.discrepancy, 2);
+});

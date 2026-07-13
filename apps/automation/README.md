@@ -76,3 +76,8 @@ over an FRP STCP visitor rather than a public image directory; see [the private 
 
 For the full store-manager Windows setup and R1 recording workflow across TikTok orders, after-sales,
 inventory, HCRD, reviews, and messages, see [the operations SOP](../../docs/specs/store-manager-windows-operations-sop.md).
+
+HCRD inventory uses the authenticated persistent Chrome profile as its session boundary. The worker
+posts to the same-origin `/inventory/inventory/listForClientAction.json`, paginates the complete
+response, normalizes the 24 source fields, and asks the configured multimodal model to cross-check up
+to five visible rows. It never exports or stores the `JSESSIONID` value.

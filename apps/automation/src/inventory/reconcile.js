@@ -37,7 +37,26 @@ function inventoryIndex(snapshot, kind) {
         ? firstNumber(record, ["platformAvailableStock", "availableStock", "available", "stock"])
         : firstNumber(record, ["availableStock", "available", "totalStock", "stock"]);
     const inTransit = firstNumber(record, ["remainingQuantity", "inTransit", "inTransitQuantity"]);
-    index.set(sku, { sku, available, inTransit, record });
+    const existing = index.get(sku);
+    if (kind === "hcrd" && existing) {
+      const combinedAvailable = existing.available === null || available === null ? null : existing.available + available;
+      const combinedInTransit = (existing.inTransit ?? 0) + (inTransit ?? 0);
+      index.set(sku, {
+        sku,
+        available: combinedAvailable,
+        inTransit: combinedInTransit,
+        record: {
+          ...existing.record,
+          id: `aggregated:${sku}`,
+          sellerSku: sku,
+          availableStock: combinedAvailable,
+          evidence: [...(existing.record.evidence || []), ...(record.evidence || [])],
+          sourceRows: [...(existing.record.sourceRows || [existing.record.id]), record.id],
+        },
+      });
+    } else {
+      index.set(sku, { sku, available, inTransit, record });
+    }
   }
   return index;
 }

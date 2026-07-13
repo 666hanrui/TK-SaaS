@@ -65,7 +65,7 @@ try {
     executablePath: config.browser.executablePath,
     locale: config.browser.locale,
     viewport: config.browser.viewport,
-    args: ["--no-first-run", "--no-default-browser-check"],
+    args: ["--no-first-run", "--no-default-browser-check", "--restore-last-session"],
   });
   const page = context.pages()[0] || (await context.newPage());
   await page.goto(target.toString(), { waitUntil: "domcontentloaded", timeout: 30_000 });

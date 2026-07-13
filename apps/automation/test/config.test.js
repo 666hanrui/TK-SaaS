@@ -62,3 +62,25 @@ test("the FRP profile permits a worker-local STCP model endpoint override", () =
   assert.equal(config.llm.baseUrl, "http://127.0.0.1:16081/v1");
   assert.equal(config.llm.model, "C:\\Users\\666\\Downloads\\Qwen3.5-9B.Q4_K_M.gguf");
 });
+
+test("HCRD inventory configuration targets the authenticated session API and keeps visual audit enabled", () => {
+  const config = loadAutomationConfig({
+    cwd: "/tmp/tk-saas-config-test",
+    env: {
+      HCRD_BASE_URL: "http://124.156.202.7:8888/wms-main",
+      HCRD_INVENTORY_PAGE_SIZE: "200",
+      HCRD_USERNAME: "test-user",
+      HCRD_PASSWORD: "test-password",
+    },
+  });
+  assert.deepEqual(config.hcrdInventory, {
+    baseUrl: "http://124.156.202.7:8888/wms-main",
+    path: "/inventory/inventory/listForClientAction.json",
+    pageSize: 200,
+    maxPages: 100,
+    visualAudit: true,
+    authWaitMs: 300_000,
+    username: "test-user",
+    password: "test-password",
+  });
+});
