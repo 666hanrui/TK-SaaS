@@ -17,6 +17,13 @@ function asText(value) {
   return String(value).trim();
 }
 
+function sourceEndpoint(value) {
+  const endpoint = new URL(value);
+  endpoint.search = "";
+  endpoint.hash = "";
+  return endpoint.toString();
+}
+
 export function parseTikTokInventoryResponse(response) {
   if (!response || typeof response !== "object") throw new Error("TikTok inventory request returned no response metadata.");
   const contentType = asText(response.contentType).toLowerCase();
@@ -58,8 +65,9 @@ export function normalizeTikTokInventoryRecord(raw, { endpoint, capturedAt }) {
         stockSaleType: asInteger(warehouse?.stock_sale_type, { field: "warehouse_stock_list.stock_sale_type", fallback: 0 }),
       }))
     : [];
+  const cleanEndpoint = sourceEndpoint(endpoint);
   const sourceText = [
-    `TikTok session API ${endpoint}`,
+    `TikTok session API ${cleanEndpoint}`,
     `SKU ID ${skuId}`,
     sellerSku ? `seller SKU ${sellerSku}` : "seller SKU empty",
     `total ${totalStock}`,
@@ -88,7 +96,7 @@ export function normalizeTikTokInventoryRecord(raw, { endpoint, capturedAt }) {
     stockModelType: asInteger(raw?.stock_model_type, { field: "stock_model_type", fallback: 0 }),
     skuComboType: asInteger(raw?.sku_combo_type, { field: "sku_combo_type", fallback: 0 }),
     warehouseStockList,
-    evidence: [{ sourceText, sourceUrl: endpoint, capturedAt }],
+    evidence: [{ sourceText, sourceUrl: cleanEndpoint, capturedAt }],
   };
 }
 
@@ -237,11 +245,11 @@ export async function readTikTokInventoryViaSession({
     const rows = payload.skus;
     const total = asInteger(payload.total_sku_count, { field: "total_sku_count", fallback: null });
     if (total !== null) sourceTotalCount = total;
-    endpoint = response.url;
+    endpoint = sourceEndpoint(response.url);
     rawRows.push(...rows);
 
     await artifactStore?.writeJson(`extraction/tiktok-api-page-${pageNumber}.json`, {
-      endpoint: response.url,
+      endpoint: sourceEndpoint(response.url),
       page: pageNumber,
       requestBody: response.requestBody,
       receivedRows: rows.length,

@@ -101,12 +101,14 @@ test("TikTok session inventory captures the current 346-SKU baseline across seve
 
 test("TikTok inventory normalization preserves empty seller SKU without losing SKU identity", () => {
   const record = normalizeTikTokInventoryRecord(rawSku(2), {
-    endpoint: "https://seller.us.tiktokshopglobalselling.com/api/v1/product/stock/sku/list",
+    endpoint: "https://seller.us.tiktokshopglobalselling.com/api/v1/product/stock/sku/list?msToken=must-not-persist&X-Bogus=dynamic",
     capturedAt: "2026-07-13T00:00:00.000Z",
   });
   assert.equal(record.sellerSku, null);
   assert.equal(record.skuId, rawSku(2).sku_id);
   assert.match(record.evidence[0].sourceText, /seller SKU empty/);
+  assert.doesNotMatch(record.evidence[0].sourceText, /must-not-persist|X-Bogus/);
+  assert.equal(record.evidence[0].sourceUrl, "https://seller.us.tiktokshopglobalselling.com/api/v1/product/stock/sku/list");
 });
 
 test("TikTok multimodal audit requires total, available, and locked values to match", () => {
