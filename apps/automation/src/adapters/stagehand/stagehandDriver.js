@@ -6,6 +6,30 @@ import { sha256 } from "../../protocol/builders.js";
 
 const LOGIN_PATTERN = /\b(sign in|log in|login|enter password|验证码|登录|验证身份)\b/i;
 const CHALLENGE_PATTERN = /\b(captcha|security check|verify you are human|unusual activity|验证|安全验证|人机验证)\b/i;
+const LIST_OUTPUT_SCHEMA_KEYS = new Set([
+  "order_list",
+  "aftersales_list",
+  "evidence_manifest",
+  "review_list",
+  "inventory_list",
+  "in_transit_list",
+  "creator_list",
+  "contact_list",
+  "mail_reply_list",
+  "message_list",
+]);
+
+function readExtractionInstruction(definition) {
+  const base = `${definition.extractInstruction}\nReturn only one object matching the requested schema. Never omit required fields.`;
+  if (!LIST_OUTPUT_SCHEMA_KEYS.has(definition.outputSchemaKey)) return base;
+
+  return `${base}
+The top-level object must always contain both "records" and "summary".
+"records" must always be an array. Every non-empty record must contain a stable non-empty "id" and at least one source-backed "evidence" item.
+"summary" must always contain "recordsValid", "capturedCount", and "warnings". Set "capturedCount" to records.length.
+If the selected filter visibly has no matching rows, return "records": [], "capturedCount": 0, and "recordsValid": true; set "visibleCount": 0 only when zero is explicitly visible, and add an empty-state warning.
+If the page is still loading or the empty state cannot be verified, return "records": [], "capturedCount": 0, "recordsValid": false, and explain why in "warnings".`;
+}
 
 function normalizeCandidate(action, pageFingerprint) {
   return {
@@ -132,7 +156,7 @@ export class StagehandAutomationDriver {
   async runRead({ definition }) {
     const schema = this.schemaRegistry[definition.outputSchemaKey];
     if (!schema) throw new Error(`No extraction schema registered for ${definition.id}`);
-    return this.stagehand.extract(definition.extractInstruction, schema, {
+    return this.stagehand.extract(readExtractionInstruction(definition), schema, {
       timeout: this.config.llm.timeoutMs,
     });
   }
