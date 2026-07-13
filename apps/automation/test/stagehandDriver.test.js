@@ -68,6 +68,44 @@ test("inventory extraction scopes the model context to the observed product list
   assert.equal(options.selector, "xpath=/html/body/main/div[2]/div[4]");
 });
 
+test("inventory extraction prefers a deterministic DOM scope and clears it afterward", async () => {
+  const driver = new StagehandAutomationDriver({
+    config: { llm: { timeoutMs: 90_000 } },
+    schemaRegistry: { inventory_list: { schema: "inventory-list" } },
+  });
+  const pageEvaluations = [];
+  driver.page = {
+    async evaluate(_callback, argument) {
+      pageEvaluations.push(argument);
+      return typeof argument === "object";
+    },
+  };
+  let options;
+  driver.stagehand = {
+    async extract(_instruction, _schema, value) {
+      options = value;
+      return { records: [], summary: { recordsValid: true, capturedCount: 0, warnings: [] } };
+    },
+  };
+
+  await driver.runRead({
+    definition: {
+      id: "tiktok.inventory.sync",
+      outputSchemaKey: "inventory_list",
+      extractInstruction: "Extract visible inventory.",
+    },
+    observation: { candidates: [] },
+  });
+
+  assert.equal(options.selector, '[data-tk-saas-extraction-scope="inventory_list"]');
+  assert.equal(pageEvaluations.length, 2);
+  assert.deepEqual(pageEvaluations[0], {
+    attribute: "data-tk-saas-extraction-scope",
+    value: "inventory_list",
+  });
+  assert.equal(pageEvaluations[1], "data-tk-saas-extraction-scope");
+});
+
 test("detail extraction still requires the requested schema without list-only fields", async () => {
   const driver = new StagehandAutomationDriver({
     config: { llm: { timeoutMs: 90_000 } },

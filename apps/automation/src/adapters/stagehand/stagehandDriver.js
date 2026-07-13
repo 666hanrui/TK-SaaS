@@ -23,6 +23,7 @@ const EXTRACTION_SCOPE_PATTERNS = Object.freeze({
   order_list: /(?:tab panel|panel|list|table|grid).*(?:order)|(?:order).*(?:tab panel|panel|list|table|grid)/i,
   aftersales_list: /(?:tab panel|panel|list|table|grid).*(?:after.?sales|return|refund|case)|(?:after.?sales|return|refund|case).*(?:tab panel|panel|list|table|grid)/i,
 });
+const EXTRACTION_SCOPE_ATTRIBUTE = "data-tk-saas-extraction-scope";
 
 function readExtractionInstruction(definition) {
   const base = `${definition.extractInstruction}\nReturn only one object matching the requested schema. Never omit required fields.`;
@@ -48,6 +49,43 @@ function readExtractionOptions(definition, observation, timeout) {
     timeout,
     ...(observedScope ? { selector: observedScope } : LIST_OUTPUT_SCHEMA_KEYS.has(definition.outputSchemaKey) ? { selector: "main" } : {}),
   };
+}
+
+async function prepareDeterministicReadScope(page, definition) {
+  if (!page?.evaluate || definition.outputSchemaKey !== "inventory_list") return undefined;
+  const scopeValue = definition.outputSchemaKey;
+  const prepared = await page.evaluate(
+    ({ attribute, value }) => {
+      document.querySelectorAll(`[${attribute}]`).forEach((element) => element.removeAttribute(attribute));
+      const anchor = [...document.querySelectorAll("input")].find((input) => {
+        const label = `${input.getAttribute("placeholder") || ""} ${input.getAttribute("aria-label") || ""}`;
+        return /商品|product/i.test(label) && /SKU|ID/i.test(label);
+      });
+      if (!anchor) return false;
+
+      let element = anchor.parentElement;
+      while (element && element !== document.body) {
+        const text = String(element.innerText || element.textContent || "").replace(/\s+/g, " ").trim();
+        const containsInventoryTable = /商品|product/i.test(text) && /状态|status/i.test(text) && /库存|stock|inventory/i.test(text);
+        const containsRows = /ID\s*[:：]?\s*\d{5,}/i.test(text) || element.querySelectorAll("[role='row'], tbody tr").length > 1;
+        if (containsInventoryTable && containsRows) {
+          element.setAttribute(attribute, value);
+          return true;
+        }
+        element = element.parentElement;
+      }
+      return false;
+    },
+    { attribute: EXTRACTION_SCOPE_ATTRIBUTE, value: scopeValue },
+  );
+  return prepared ? `[${EXTRACTION_SCOPE_ATTRIBUTE}="${scopeValue}"]` : undefined;
+}
+
+async function clearDeterministicReadScope(page) {
+  if (!page?.evaluate) return;
+  await page.evaluate((attribute) => {
+    document.querySelectorAll(`[${attribute}]`).forEach((element) => element.removeAttribute(attribute));
+  }, EXTRACTION_SCOPE_ATTRIBUTE);
 }
 
 function normalizeCandidate(action, pageFingerprint) {
@@ -175,11 +213,14 @@ export class StagehandAutomationDriver {
   async runRead({ definition, observation }) {
     const schema = this.schemaRegistry[definition.outputSchemaKey];
     if (!schema) throw new Error(`No extraction schema registered for ${definition.id}`);
-    return this.stagehand.extract(
-      readExtractionInstruction(definition),
-      schema,
-      readExtractionOptions(definition, observation, this.config.llm.timeoutMs),
-    );
+    const deterministicSelector = await prepareDeterministicReadScope(this.page, definition);
+    const options = readExtractionOptions(definition, observation, this.config.llm.timeoutMs);
+    if (deterministicSelector) options.selector = deterministicSelector;
+    try {
+      return await this.stagehand.extract(readExtractionInstruction(definition), schema, options);
+    } finally {
+      if (deterministicSelector) await clearDeterministicReadScope(this.page);
+    }
   }
 
   async runInternal() {
