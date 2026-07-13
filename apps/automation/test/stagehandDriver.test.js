@@ -2,6 +2,40 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { StagehandAutomationDriver } from "../src/adapters/stagehand/stagehandDriver.js";
 
+test("inventory observation uses deterministic page checks without full-page action enumeration", async () => {
+  const driver = new StagehandAutomationDriver({
+    config: { llm: { timeoutMs: 90_000 } },
+  });
+  let observeCalled = false;
+  driver.stagehand = {
+    async extract() {
+      return { pageText: "管理库存 Estrella Hair" };
+    },
+    async observe() {
+      observeCalled = true;
+      return [];
+    },
+  };
+  driver.page = {
+    async evaluate() {
+      return { url: "https://seller.us.tiktokshopglobalselling.com/product/stock", title: "Inventory", headings: [], buttons: [] };
+    },
+    url() {
+      return "https://seller.us.tiktokshopglobalselling.com/product/stock?shop_region=US";
+    },
+  };
+
+  const observation = await driver.observe({
+    task: { target: { origin: "https://seller.us.tiktokshopglobalselling.com" } },
+    definition: { outputSchemaKey: "inventory_list", allowedMethods: ["click", "fill", "extract"] },
+  });
+
+  assert.equal(observeCalled, false);
+  assert.equal(observation.authenticated, true);
+  assert.equal(observation.challengeDetected, false);
+  assert.deepEqual(observation.candidates, []);
+});
+
 test("list extraction explicitly defines a verified empty-state result", async () => {
   const driver = new StagehandAutomationDriver({
     config: { llm: { timeoutMs: 90_000 } },

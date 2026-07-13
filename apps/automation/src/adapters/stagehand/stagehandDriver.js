@@ -254,9 +254,11 @@ export class StagehandAutomationDriver {
     const pageTextResult = await this.stagehand.extract();
     const pageText = String(pageTextResult?.pageText || pageTextResult || "");
     const pageFingerprint = await this.pageFingerprint();
-    const actions = await this.stagehand.observe(definition.observeInstruction, {
-      timeout: this.config.llm.timeoutMs,
-    });
+    const actions = definition.outputSchemaKey === "inventory_list"
+      ? []
+      : await this.stagehand.observe(definition.observeInstruction, {
+          timeout: this.config.llm.timeoutMs,
+        });
     const candidates = actions
       .map((action) => normalizeCandidate(action, pageFingerprint))
       .filter((candidate) => definition.allowedMethods.includes(candidate.method));
