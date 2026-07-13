@@ -24,7 +24,6 @@ const EXTRACTION_SCOPE_PATTERNS = Object.freeze({
 });
 const EXTRACTION_SCOPE_ATTRIBUTE = "data-tk-saas-extraction-scope";
 const EXTRACTION_ROW_ATTRIBUTE = "data-tk-saas-extraction-row";
-const EXTRACTION_IGNORE_ATTRIBUTE = "data-tk-saas-extraction-ignore";
 const INVENTORY_BATCH_SIZE = 5;
 
 function readExtractionInstruction(definition) {
@@ -56,10 +55,9 @@ function readExtractionOptions(definition, observation, timeout) {
 async function prepareInventoryReadScope(page) {
   if (!page?.evaluate) return { prepared: false, reason: "page_evaluate_unavailable" };
   return page.evaluate(
-    ({ scopeAttribute, rowAttribute, ignoreAttribute }) => {
-      for (const attribute of [scopeAttribute, rowAttribute, ignoreAttribute]) {
-        document.querySelectorAll(`[${attribute}]`).forEach((element) => element.removeAttribute(attribute));
-      }
+    ({ scopeAttribute, rowAttribute }) => {
+      document.querySelectorAll(`[${scopeAttribute}]`).forEach((element) => element.remove());
+      document.querySelectorAll(`[${rowAttribute}]`).forEach((element) => element.removeAttribute(rowAttribute));
       if (location.pathname !== "/product/stock") {
         return { prepared: false, reason: "unexpected_inventory_path", pathname: location.pathname };
       }
@@ -67,8 +65,6 @@ async function prepareInventoryReadScope(page) {
       if (!body) return { prepared: false, reason: "core_table_body_not_found" };
       const rows = [...body.querySelectorAll("tbody tr")];
       if (!rows.length) return { prepared: false, reason: "inventory_rows_not_loaded" };
-      const container = body.closest(".core-table") || body.parentElement || body;
-      container.setAttribute(scopeAttribute, "inventory_list");
       rows.forEach((row, index) => row.setAttribute(rowAttribute, String(index)));
       return {
         prepared: true,
@@ -79,25 +75,37 @@ async function prepareInventoryReadScope(page) {
     {
       scopeAttribute: EXTRACTION_SCOPE_ATTRIBUTE,
       rowAttribute: EXTRACTION_ROW_ATTRIBUTE,
-      ignoreAttribute: EXTRACTION_IGNORE_ATTRIBUTE,
     },
   );
 }
 
 async function selectInventoryBatch(page, start, end) {
   return page.evaluate(
-    ({ rowAttribute, ignoreAttribute, startIndex, endIndex }) => {
+    ({ scopeAttribute, rowAttribute, startIndex, endIndex }) => {
+      document.querySelectorAll(`[${scopeAttribute}]`).forEach((element) => element.remove());
       const rows = [...document.querySelectorAll(`[${rowAttribute}]`)];
-      rows.forEach((row) => {
+      const selectedRows = rows.filter((row) => {
         const index = Number(row.getAttribute(rowAttribute));
-        if (index >= startIndex && index < endIndex) row.removeAttribute(ignoreAttribute);
-        else row.setAttribute(ignoreAttribute, "true");
+        return index >= startIndex && index < endIndex;
       });
-      return rows.filter((row) => !row.hasAttribute(ignoreAttribute)).length;
+      const scope = document.createElement("section");
+      scope.setAttribute(scopeAttribute, "inventory_list");
+      scope.style.whiteSpace = "pre-wrap";
+      const heading = document.createElement("h2");
+      heading.textContent = "TikTok SKU stock table batch. Columns: SKU, total stock, available, locked, stock alert, auto restock, sales 30d, forecast 30d, recommended restock 30d, supply days, operation, reserved, order occupied.";
+      scope.appendChild(heading);
+      selectedRows.forEach((row) => {
+        const index = Number(row.getAttribute(rowAttribute));
+        const entry = document.createElement("pre");
+        entry.textContent = `SKU table row ${index + 1}:\n${String(row.innerText || row.textContent || "").trim()}`;
+        scope.appendChild(entry);
+      });
+      document.body.appendChild(scope);
+      return selectedRows.length;
     },
     {
+      scopeAttribute: EXTRACTION_SCOPE_ATTRIBUTE,
       rowAttribute: EXTRACTION_ROW_ATTRIBUTE,
-      ignoreAttribute: EXTRACTION_IGNORE_ATTRIBUTE,
       startIndex: start,
       endIndex: end,
     },
@@ -108,9 +116,12 @@ async function clearInventoryReadScope(page) {
   if (!page?.evaluate) return;
   await page.evaluate((attributes) => {
     for (const attribute of attributes) {
-      document.querySelectorAll(`[${attribute}]`).forEach((element) => element.removeAttribute(attribute));
+      document.querySelectorAll(`[${attribute}]`).forEach((element) => {
+        if (attribute === "data-tk-saas-extraction-scope") element.remove();
+        else element.removeAttribute(attribute);
+      });
     }
-  }, [EXTRACTION_SCOPE_ATTRIBUTE, EXTRACTION_ROW_ATTRIBUTE, EXTRACTION_IGNORE_ATTRIBUTE]);
+  }, [EXTRACTION_SCOPE_ATTRIBUTE, EXTRACTION_ROW_ATTRIBUTE]);
 }
 
 function inventoryBatchInstruction(definition, start, end, total) {
@@ -309,7 +320,6 @@ export class StagehandAutomationDriver {
           await this.stagehand.extract(inventoryBatchInstruction(definition, start, end, scope.rowCount), schema, {
             timeout: this.config.llm.timeoutMs,
             selector: `[${EXTRACTION_SCOPE_ATTRIBUTE}="inventory_list"]`,
-            ignoreSelectors: [`[${EXTRACTION_IGNORE_ATTRIBUTE}]`],
           }),
         );
       }

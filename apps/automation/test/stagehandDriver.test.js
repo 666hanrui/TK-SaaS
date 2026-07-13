@@ -76,7 +76,7 @@ test("inventory extraction processes the dedicated stock table in bounded SKU ba
   assert.match(calls[4].instruction, /rows 21-25 of 25/);
   assert.match(calls[0].instruction, /exactly one concise evidence item/);
   assert.equal(calls[0].options.selector, '[data-tk-saas-extraction-scope="inventory_list"]');
-  assert.deepEqual(calls[0].options.ignoreSelectors, ['[data-tk-saas-extraction-ignore]']);
+  assert.equal(calls[0].options.ignoreSelectors, undefined);
   assert.equal(result.records.length, 25);
   assert.deepEqual(result.summary, {
     recordsValid: true,
@@ -88,7 +88,6 @@ test("inventory extraction processes the dedicated stock table in bounded SKU ba
   assert.deepEqual(pageEvaluations.at(-1), [
     "data-tk-saas-extraction-scope",
     "data-tk-saas-extraction-row",
-    "data-tk-saas-extraction-ignore",
   ]);
 });
 
