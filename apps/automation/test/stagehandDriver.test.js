@@ -53,9 +53,9 @@ test("inventory extraction processes the dedicated stock table in bounded SKU ba
   driver.stagehand = {
     async extract(instruction, _schema, options) {
       const batchIndex = calls.length;
-      const count = batchIndex < 2 ? 10 : 5;
+      const count = 5;
       const records = Array.from({ length: count }, (_, offset) => {
-        const id = String(1_732_000_000_000_000_000n + BigInt(batchIndex * 10 + offset));
+        const id = String(1_732_000_000_000_000_000n + BigInt(batchIndex * 5 + offset));
         return { id, skuId: id, evidence: [{ sourceText: `SKU ID: ${id}` }] };
       });
       calls.push({ instruction, options });
@@ -71,9 +71,10 @@ test("inventory extraction processes the dedicated stock table in bounded SKU ba
     },
   });
 
-  assert.equal(calls.length, 3);
-  assert.match(calls[0].instruction, /rows 1-10 of 25/);
-  assert.match(calls[2].instruction, /rows 21-25 of 25/);
+  assert.equal(calls.length, 5);
+  assert.match(calls[0].instruction, /rows 1-5 of 25/);
+  assert.match(calls[4].instruction, /rows 21-25 of 25/);
+  assert.match(calls[0].instruction, /exactly one concise evidence item/);
   assert.equal(calls[0].options.selector, '[data-tk-saas-extraction-scope="inventory_list"]');
   assert.deepEqual(calls[0].options.ignoreSelectors, ['[data-tk-saas-extraction-ignore]']);
   assert.equal(result.records.length, 25);
@@ -83,7 +84,7 @@ test("inventory extraction processes the dedicated stock table in bounded SKU ba
     capturedCount: 25,
     warnings: [],
   });
-  assert.equal(pageEvaluations.filter((value) => value?.startIndex !== undefined).length, 3);
+  assert.equal(pageEvaluations.filter((value) => value?.startIndex !== undefined).length, 5);
   assert.deepEqual(pageEvaluations.at(-1), [
     "data-tk-saas-extraction-scope",
     "data-tk-saas-extraction-row",

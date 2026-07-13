@@ -25,7 +25,7 @@ const EXTRACTION_SCOPE_PATTERNS = Object.freeze({
 const EXTRACTION_SCOPE_ATTRIBUTE = "data-tk-saas-extraction-scope";
 const EXTRACTION_ROW_ATTRIBUTE = "data-tk-saas-extraction-row";
 const EXTRACTION_IGNORE_ATTRIBUTE = "data-tk-saas-extraction-ignore";
-const INVENTORY_BATCH_SIZE = 10;
+const INVENTORY_BATCH_SIZE = 5;
 
 function readExtractionInstruction(definition) {
   const base = `${definition.extractInstruction}\nReturn only one object matching the requested schema. Never omit required fields.`;
@@ -118,6 +118,7 @@ function inventoryBatchInstruction(definition, start, end, total) {
 This is TikTok Shop's dedicated SKU stock page. Extract exactly one record per selected SKU table row, covering rows ${start + 1}-${end} of ${total}.
 Use the visible numeric SKU ID as both "id" and "skuId". Also extract productTitle, variation, totalStock, availableStock, lockedStock, stockAlert, autoRestock, sales30d, forecast30d, recommendedRestock30d, supplyDays, reservedStock, and orderOccupiedStock when visible.
 The table columns are: SKU, total stock, available, locked, stock alert, auto restock, sales in the last 30 days, forecast for the next 30 days, recommended restock for the next 30 days, supply days, operation, reserved, and order occupied.
+For each record include exactly one concise evidence item whose sourceText contains the visible SKU ID, variation, total stock, available stock, and locked stock. Do not repeat the whole row in multiple evidence items.
 Do not include rows outside this selected batch. The independent Seller SKU is not displayed, so do not invent it.`;
 }
 
