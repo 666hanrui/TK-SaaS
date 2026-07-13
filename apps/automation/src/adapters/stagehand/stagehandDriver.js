@@ -282,7 +282,7 @@ export class StagehandAutomationDriver {
 
   async navigate({ task, definition }) {
     try {
-      await this.page.goto(task.target.url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      await this.page.goto(task.target.url, { waitUntil: "domcontentloaded", timeoutMs: 30_000 });
     } catch (error) {
       const actualOrigin = new URL(this.page.url()).origin;
       const timedOut = /timeout/i.test(error instanceof Error ? error.message : String(error));

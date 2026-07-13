@@ -37,53 +37,37 @@ function rawSku(index) {
 
 function fakeResponse(pageNumber, rows, total) {
   return {
-    status: () => 200,
-    url: () => "https://seller.us.tiktokshopglobalselling.com/api/v1/product/stock/sku/list",
-    headers: () => ({ "content-type": "application/json" }),
-    text: async () => JSON.stringify({ skus: rows, total_sku_count: total }),
-    request: () => ({
-      method: () => "POST",
-      postData: () => JSON.stringify({ page_no: pageNumber, page_size: 50 }),
-    }),
+    status: 200,
+    url: "https://seller.us.tiktokshopglobalselling.com/api/v1/product/stock/sku/list",
+    contentType: "application/json",
+    text: JSON.stringify({ skus: rows, total_sku_count: total }),
+    requestBody: JSON.stringify({ page_no: pageNumber, page_size: 50 }),
   };
 }
 
 function fakePage(allRows) {
-  let pending;
+  const captures = [];
   const emit = (pageNumber) => {
     const start = (pageNumber - 1) * 50;
-    const response = fakeResponse(pageNumber, allRows.slice(start, start + 50), allRows.length);
-    assert.equal(pending.predicate(response), true);
-    pending.resolve(response);
+    captures.push(fakeResponse(pageNumber, allRows.slice(start, start + 50), allRows.length));
   };
   return {
-    waitForResponse(predicate) {
-      return new Promise((resolve) => {
-        pending = { predicate, resolve };
+    async addInitScript(_script, argument) {
+      assert.deepEqual(argument, {
+        key: "__TK_SAAS_TIKTOK_INVENTORY_CAPTURES__",
+        apiPath: "/api/v1/product/stock/sku/list",
       });
     },
-    async reload() {
+    async reload(options) {
+      assert.deepEqual(options, { waitUntil: "domcontentloaded", timeoutMs: 30_000 });
       emit(1);
     },
-    locator() {
-      return {
-        filter({ hasText }) {
-          const pageNumber = Number(hasText.source.match(/(\d+)/)?.[1]);
-          return {
-            first() {
-              return {
-                async count() {
-                  return 1;
-                },
-                async click() {
-                  emit(pageNumber);
-                },
-              };
-            },
-          };
-        },
-      };
+    async evaluate(_callback, argument) {
+      if (argument.key) return captures;
+      emit(argument.requestedPage);
+      return true;
     },
+    async waitForTimeout() {},
   };
 }
 

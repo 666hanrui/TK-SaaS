@@ -9,7 +9,7 @@ test("HCRD navigation tolerates a DOM-content timeout only after the target orig
   let waited = 0;
   driver.page = {
     async goto(_url, options) {
-      assert.deepEqual(options, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      assert.deepEqual(options, { waitUntil: "domcontentloaded", timeoutMs: 30_000 });
       throw new Error("page.goto: Timeout 30000ms exceeded");
     },
     url() {

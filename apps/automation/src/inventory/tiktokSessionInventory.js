@@ -1,6 +1,7 @@
 const DEFAULT_API_PATH = "/api/v1/product/stock/sku/list";
 const DEFAULT_PAGE_SIZE = 50;
 const DEFAULT_MAX_PAGES = 100;
+const CAPTURE_KEY = "__TK_SAAS_TIKTOK_INVENTORY_CAPTURES__";
 
 function asInteger(value, { field, fallback = null } = {}) {
   if (value === undefined || value === null || value === "") return fallback;
@@ -14,14 +15,6 @@ function asInteger(value, { field, fallback = null } = {}) {
 function asText(value) {
   if (value === undefined || value === null) return "";
   return String(value).trim();
-}
-
-function responseMetadata(response) {
-  return {
-    status: response.status(),
-    url: response.url(),
-    contentType: String(response.headers()["content-type"] || ""),
-  };
 }
 
 export function parseTikTokInventoryResponse(response) {
@@ -99,49 +92,106 @@ export function normalizeTikTokInventoryRecord(raw, { endpoint, capturedAt }) {
   };
 }
 
-async function captureInventoryResponse(page, { apiPath, action, timeoutMs }) {
-  const responsePromise = page.waitForResponse(
-    (response) => {
-      try {
-        return new URL(response.url()).pathname === apiPath && response.request().method() === "POST";
-      } catch {
-        return false;
-      }
-    },
-    { timeout: timeoutMs },
-  );
-  await action();
-  const response = await responsePromise;
-  return {
-    ...responseMetadata(response),
-    text: await response.text(),
-    requestBody: response.request().postData() || null,
-  };
-}
-
-async function reloadFirstPage(page, options) {
-  return captureInventoryResponse(page, {
-    ...options,
-    action: async () => {
-      await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 }).catch((error) => {
-        if (!/timeout/i.test(error instanceof Error ? error.message : String(error))) throw error;
-      });
-    },
-  });
-}
-
-async function clickInventoryPage(page, pageNumber, options) {
-  const item = page.locator(".core-pagination li").filter({ hasText: new RegExp(`^\\s*${pageNumber}\\s*$`) }).first();
-  if ((await item.count()) !== 1) throw new Error(`TikTok inventory pagination control for page ${pageNumber} was not found.`);
-  return captureInventoryResponse(page, {
-    ...options,
-    action: () => item.click({ timeout: 10_000 }),
-  });
-}
-
 function pageSignature(rows) {
   if (!rows.length) return "empty";
   return `${rows.length}:${asText(rows[0]?.sku_id)}:${asText(rows.at(-1)?.sku_id)}`;
+}
+
+function installInventoryCapture({ key, apiPath }) {
+  const matches = (value) => {
+    try {
+      return new URL(String(value), location.href).pathname === apiPath;
+    } catch {
+      return false;
+    }
+  };
+  const captures = [];
+  Object.defineProperty(globalThis, key, { configurable: true, value: captures });
+  const push = (capture) => captures.push({ capturedAt: new Date().toISOString(), ...capture });
+
+  const originalFetch = globalThis.fetch;
+  if (typeof originalFetch === "function") {
+    globalThis.fetch = async function tkSaasInventoryFetch(input, init) {
+      const response = await originalFetch.apply(this, arguments);
+      const url = typeof input === "string" || input instanceof URL ? String(input) : input?.url;
+      if (matches(url)) {
+        const clone = response.clone();
+        void clone.text().then((text) => push({
+          transport: "fetch",
+          url: clone.url || new URL(String(url), location.href).toString(),
+          status: clone.status,
+          contentType: clone.headers.get("content-type") || "",
+          requestBody: typeof init?.body === "string" ? init.body : null,
+          text,
+        })).catch(() => {});
+      }
+      return response;
+    };
+  }
+
+  const xhrPrototype = globalThis.XMLHttpRequest?.prototype;
+  if (xhrPrototype) {
+    const originalOpen = xhrPrototype.open;
+    const originalSend = xhrPrototype.send;
+    xhrPrototype.open = function tkSaasInventoryOpen(method, url) {
+      this.__tkSaasInventoryRequest = { method: String(method || "GET"), url: new URL(String(url), location.href).toString() };
+      return originalOpen.apply(this, arguments);
+    };
+    xhrPrototype.send = function tkSaasInventorySend(body) {
+      const request = this.__tkSaasInventoryRequest;
+      if (request && matches(request.url)) {
+        this.addEventListener("load", () => push({
+          transport: "xhr",
+          url: this.responseURL || request.url,
+          status: this.status,
+          contentType: this.getResponseHeader("content-type") || "",
+          requestBody: typeof body === "string" ? body : null,
+          text: typeof this.responseText === "string" ? this.responseText : "",
+        }), { once: true });
+      }
+      return originalSend.apply(this, arguments);
+    };
+  }
+}
+
+async function readCapturedResponses(page) {
+  return page.evaluate(({ key }) => Array.isArray(globalThis[key]) ? globalThis[key] : [], { key: CAPTURE_KEY });
+}
+
+async function waitForUniqueCapture(page, { cursor, seenSignatures, timeoutMs }) {
+  const deadline = Date.now() + timeoutMs;
+  let nextCursor = cursor;
+  let lastError;
+  while (Date.now() < deadline) {
+    const captures = await readCapturedResponses(page);
+    while (nextCursor < captures.length) {
+      const response = captures[nextCursor];
+      nextCursor += 1;
+      try {
+        const payload = parseTikTokInventoryResponse(response);
+        const signature = pageSignature(payload.skus);
+        if (seenSignatures.has(signature)) continue;
+        seenSignatures.add(signature);
+        return { response, payload, cursor: nextCursor };
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    await page.waitForTimeout(250);
+  }
+  const detail = lastError instanceof Error ? ` Last response error: ${lastError.message}` : "";
+  throw new Error(`Timed out waiting for a new TikTok inventory API page.${detail}`);
+}
+
+async function clickInventoryPage(page, pageNumber) {
+  const clicked = await page.evaluate(({ requestedPage }) => {
+    const items = [...document.querySelectorAll(".core-pagination li")];
+    const item = items.find((element) => String(element.textContent || "").trim() === String(requestedPage));
+    if (!item) return false;
+    item.click();
+    return true;
+  }, { requestedPage: pageNumber });
+  if (!clicked) throw new Error(`TikTok inventory pagination control for page ${pageNumber} was not found.`);
 }
 
 export async function readTikTokInventoryViaSession({
@@ -153,8 +203,8 @@ export async function readTikTokInventoryViaSession({
   timeoutMs = 30_000,
   now = () => new Date(),
 }) {
-  if (!page?.waitForResponse || !page?.reload || !page?.locator) {
-    throw new Error("TikTok session inventory requires a Playwright browser page.");
+  if (!page?.addInitScript || !page?.reload || !page?.evaluate || !page?.waitForTimeout) {
+    throw new Error("TikTok session inventory requires a Stagehand browser page.");
   }
   const size = asInteger(pageSize, { field: "pageSize" });
   const limit = asInteger(maxPages, { field: "maxPages" });
@@ -168,21 +218,26 @@ export async function readTikTokInventoryViaSession({
   let endpoint = null;
   let pageNumber = 1;
   let paginationComplete = false;
+  let captureCursor = 0;
+
+  await page.addInitScript(installInventoryCapture, { key: CAPTURE_KEY, apiPath });
+  await page.reload({ waitUntil: "domcontentloaded", timeoutMs: 30_000 }).catch((error) => {
+    if (!/timeout/i.test(error instanceof Error ? error.message : String(error))) throw error;
+  });
 
   while (pageNumber <= limit) {
-    const response = pageNumber === 1
-      ? await reloadFirstPage(page, { apiPath, timeoutMs })
-      : await clickInventoryPage(page, pageNumber, { apiPath, timeoutMs });
-    const payload = parseTikTokInventoryResponse(response);
+    if (pageNumber > 1) await clickInventoryPage(page, pageNumber);
+    const captured = await waitForUniqueCapture(page, {
+      cursor: captureCursor,
+      seenSignatures,
+      timeoutMs,
+    });
+    captureCursor = captured.cursor;
+    const { response, payload } = captured;
     const rows = payload.skus;
     const total = asInteger(payload.total_sku_count, { field: "total_sku_count", fallback: null });
     if (total !== null) sourceTotalCount = total;
     endpoint = response.url;
-    const signature = pageSignature(rows);
-    if (seenSignatures.has(signature) && rows.length > 0) {
-      throw new Error(`TikTok inventory pagination repeated page data at page ${pageNumber}.`);
-    }
-    seenSignatures.add(signature);
     rawRows.push(...rows);
 
     await artifactStore?.writeJson(`extraction/tiktok-api-page-${pageNumber}.json`, {
