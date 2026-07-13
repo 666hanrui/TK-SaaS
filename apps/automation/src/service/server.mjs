@@ -163,6 +163,10 @@ const server = http.createServer(async (request, response) => {
         sendJson(response, 404, { ok: false, message: "One or more requested source snapshots were not found" });
         return;
       }
+      if (body.skuMappingVersion && body.mapping?.version && body.skuMappingVersion !== body.mapping.version) {
+        sendJson(response, 400, { ok: false, message: "skuMappingVersion must match mapping.version" });
+        return;
+      }
       const result = reconcileInventorySnapshots({
         hcrdSnapshot,
         tiktokSnapshot,
@@ -181,7 +185,7 @@ const server = http.createServer(async (request, response) => {
           inTransitSnapshotId: body.inTransitSnapshotId || null,
         },
         input: {
-          skuMappingVersion: body.skuMappingVersion || "unversioned",
+          skuMappingVersion: body.skuMappingVersion || body.mapping?.version || "unversioned",
           safetyStockVersion: body.safetyStockVersion || "unversioned",
         },
         result,

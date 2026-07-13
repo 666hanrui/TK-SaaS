@@ -172,7 +172,7 @@ npm run dispatch -- --file <安全工作目录>/hcrd-inventory-sync.json
 npm run dispatch -- --file <安全工作目录>/hcrd-in-transit-sync.json
 ```
 
-首轮一次只派发一个模块，等待 `monitor` 显示 `queueStatus: completed`，再检查对应源数据快照。TikTok 库存任务监听页面自身的 `POST /api/v1/product/stock/sku/list` 响应并通过可见分页读取到 `total_sku_count`（当前基线为 345 条）；HCRD 现货任务通过 `POST /inventory/inventory/listForClientAction.json` 自动读取完整分页（当前基线为 303 条）。两者都只让模型抽查当前屏幕中最多 5 行。不要并行使用同一个 profile；worker 的 profile lease 会拒绝并发复用。
+首轮一次只派发一个模块，等待 `monitor` 显示 `queueStatus: completed`，再检查对应源数据快照。TikTok 库存任务监听页面自身的 `POST /api/v1/product/stock/sku/list` 响应并通过可见分页读取到 `total_sku_count`（2026-07-13 已验证基线为 346 条）；HCRD 现货任务通过 `POST /inventory/inventory/listForClientAction.json` 自动读取完整分页（2026-07-13 已验证基线为 303 条）。两者都只让模型抽查当前屏幕中最多 5 行。不要并行使用同一个 profile；worker 的 profile lease 会拒绝并发复用。
 
 HCRD 没有独立开放 API Key。认证仅来自该 Chrome profile 中的 `JSESSIONID`；程序在同源页面内请求接口，不复制、不打印、不写入 `.env`。接口返回 HTML、分页总数不一致或视觉样本不一致时，任务失败且不会生成已验证快照。
 
@@ -181,7 +181,7 @@ HCRD 没有独立开放 API Key。认证仅来自该 Chrome profile 中的 `JSES
 库存核对有三个安全步骤：
 
 1. 分别完成 `hcrd.inventory.sync` 与 `tiktok.inventory.sync`，可选再完成 `hcrd.inventory.sync_in_transit`。
-2. 从 `npm run records` 中取得这三个 snapshot run ID，填入 `examples/shadow/inventory-reconcile.json`；同时填写经过确认的 HCRD SKU → TikTok Seller SKU 映射和安全库存。若 TikTok 接口的 `seller_sku` 为空，映射目标必须使用该行的 TikTok `sku_id`。
+2. 从 `npm run records` 中取得这三个 snapshot run ID，填入 `examples/shadow/inventory-reconcile.json`；同时填写经过确认的 SKU 映射和安全库存。若 TikTok 接口的 `seller_sku` 为空，映射目标必须使用该行的 TikTok `sku_id`。`direct` 表示单个 HCRD SKU 对应一个 TikTok SKU；`bundle` 表示多个 HCRD 组件共同组成一个 TikTok SKU，组件的 `quantity` 是每套用量。
 3. 从本机执行：
 
 ```bash
@@ -189,6 +189,8 @@ npm run inventory:reconcile -- --file <安全工作目录>/inventory-reconcile.j
 ```
 
 它只在店长电脑本地比较已验证快照，输出：HCRD 可用库存、TikTok 可用库存、在途、差异、安全库存、补货建议，以及所有未映射 SKU。它不打开浏览器、不调用模型、不保存 TikTok 库存。核对报告也会进入 `internal.inventory.reconcile` 源数据快照。
+
+组合 SKU 的 HCRD 可用量固定按 `min(floor(组件可用量 / 每套用量))` 计算，禁止相加。首批订单与物流单号双重匹配得到的三条普通映射，以及 `GLM801 + GLM802` 对应 TikTok Free Bonus 的组合规则，保存在 `apps/automation/examples/shadow/estrella-hcrd-sku-mapping-v1.json`。新增映射必须保留订单号、物流单号或人工确认记录，并递增版本；不要覆盖历史版本。
 
 ## 9. 每日运行节奏
 

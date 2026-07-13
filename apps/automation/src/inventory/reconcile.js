@@ -62,17 +62,94 @@ function inventoryIndex(snapshot, kind) {
 }
 
 function normalizeMapping(mapping) {
-  const entries = Array.isArray(mapping)
-    ? mapping.map((row) => [row.hcrdSku ?? row.sourceSku, row.tiktokSku ?? row.targetSku])
-    : Object.entries(mapping || {});
-  const normalized = new Map();
-  for (const [hcrdSku, tiktokSku] of entries) {
-    if (!hcrdSku || !tiktokSku) throw new Error("Every SKU mapping requires hcrdSku/sourceSku and tiktokSku/targetSku.");
-    if (normalized.has(String(hcrdSku))) throw new Error(`Duplicate HCRD SKU mapping: ${hcrdSku}`);
-    normalized.set(String(hcrdSku), String(tiktokSku));
+  const rawEntries = Array.isArray(mapping)
+    ? mapping
+    : Array.isArray(mapping?.entries)
+      ? mapping.entries
+      : Object.entries(mapping || {}).map(([hcrdSku, tiktokSku]) => ({ type: "direct", hcrdSku, tiktokSku }));
+  const normalized = [];
+  const mappedHcrdSkus = new Set();
+  const mappedTikTokSkus = new Set();
+
+  for (const rawEntry of rawEntries) {
+    const entry = Array.isArray(rawEntry)
+      ? { type: "direct", hcrdSku: rawEntry[0], tiktokSku: rawEntry[1] }
+      : rawEntry;
+    const type = entry?.type ?? entry?.mappingType ?? "direct";
+    const tiktokSku = entry?.tiktokSku ?? entry?.targetSku;
+    if (!tiktokSku) throw new Error("Every SKU mapping requires tiktokSku/targetSku.");
+    if (mappedTikTokSkus.has(String(tiktokSku))) throw new Error(`Duplicate TikTok SKU mapping: ${tiktokSku}`);
+
+    let components;
+    if (type === "direct") {
+      const hcrdSku = entry?.hcrdSku ?? entry?.sourceSku;
+      if (!hcrdSku) throw new Error("Every direct SKU mapping requires hcrdSku/sourceSku.");
+      components = [{ hcrdSku: String(hcrdSku), quantity: 1 }];
+    } else if (type === "bundle") {
+      if (!Array.isArray(entry?.components) || entry.components.length === 0) {
+        throw new Error(`Bundle mapping ${tiktokSku} requires at least one HCRD component.`);
+      }
+      components = entry.components.map((component) => {
+        const hcrdSku = component?.hcrdSku ?? component?.sourceSku;
+        const quantity = asNumber(component?.quantity ?? component?.requiredQuantity ?? 1);
+        if (!hcrdSku || quantity === null || quantity <= 0 || !Number.isInteger(quantity)) {
+          throw new Error(`Invalid bundle component for TikTok SKU ${tiktokSku}.`);
+        }
+        return { hcrdSku: String(hcrdSku), quantity };
+      });
+      if (new Set(components.map(({ hcrdSku }) => hcrdSku)).size !== components.length) {
+        throw new Error(`Bundle mapping ${tiktokSku} contains a duplicate HCRD component.`);
+      }
+    } else {
+      throw new Error(`Unsupported SKU mapping type: ${type}`);
+    }
+
+    for (const { hcrdSku } of components) {
+      if (mappedHcrdSkus.has(hcrdSku)) throw new Error(`Duplicate HCRD SKU mapping: ${hcrdSku}`);
+      mappedHcrdSkus.add(hcrdSku);
+    }
+    mappedTikTokSkus.add(String(tiktokSku));
+    normalized.push({
+      type,
+      tiktokSku: String(tiktokSku),
+      components,
+      evidence: entry?.evidence ?? [],
+    });
   }
-  if (normalized.size === 0) throw new Error("At least one approved SKU mapping is required for inventory reconciliation.");
-  return normalized;
+  if (normalized.length === 0) throw new Error("At least one approved SKU mapping is required for inventory reconciliation.");
+  return {
+    version: typeof mapping?.version === "string" && mapping.version.trim() ? mapping.version.trim() : "legacy-unversioned",
+    status: typeof mapping?.status === "string" && mapping.status.trim() ? mapping.status.trim() : "unspecified",
+    entries: normalized,
+    mappedHcrdSkus,
+    mappedTikTokSkus,
+  };
+}
+
+function bundleStock(components, hcrdBySku, transitBySku) {
+  const rows = components.map(({ hcrdSku, quantity }) => {
+    const hcrd = hcrdBySku.get(hcrdSku);
+    const transit = transitBySku.get(hcrdSku);
+    const available = hcrd?.available ?? null;
+    const inTransit = transit?.inTransit ?? transit?.available ?? 0;
+    return {
+      hcrdSku,
+      requiredQuantity: quantity,
+      available,
+      inTransit,
+      currentCapacity: available === null ? null : Math.floor(available / quantity),
+      projectedCapacity: available === null ? null : Math.floor((available + inTransit) / quantity),
+      evidence: [hcrd?.record?.evidence, transit?.record?.evidence].filter(Boolean),
+    };
+  });
+  const complete = rows.every(({ currentCapacity }) => currentCapacity !== null);
+  const currentCapacity = complete ? Math.min(...rows.map(({ currentCapacity: value }) => value)) : null;
+  const projectedCapacity = complete ? Math.min(...rows.map(({ projectedCapacity: value }) => value)) : null;
+  return {
+    rows,
+    currentCapacity,
+    inTransitCapacity: complete ? Math.max(0, projectedCapacity - currentCapacity) : 0,
+  };
 }
 
 function normalizeSafetyStock(safetyStock) {
@@ -105,38 +182,40 @@ export function reconcileInventorySnapshots({ hcrdSnapshot, tiktokSnapshot, inTr
   const skuMapping = normalizeMapping(mapping);
   const safetyBySku = normalizeSafetyStock(safetyStock);
   const rows = [];
-  const mappedTikTokSkus = new Set();
 
-  for (const [hcrdSku, tiktokSku] of skuMapping.entries()) {
-    mappedTikTokSkus.add(tiktokSku);
-    const hcrd = hcrdBySku.get(hcrdSku);
+  for (const mappingEntry of skuMapping.entries) {
+    const { type, tiktokSku, components } = mappingEntry;
     const tiktok = tiktokBySku.get(tiktokSku);
-    const transit = transitBySku.get(hcrdSku) ?? transitBySku.get(tiktokSku);
-    const safety = safetyBySku.get(tiktokSku) ?? safetyBySku.get(hcrdSku) ?? 0;
-    const hcrdAvailable = hcrd?.available ?? null;
+    const hcrdSku = type === "direct" ? components[0].hcrdSku : null;
+    const safety = safetyBySku.get(tiktokSku) ?? (hcrdSku ? safetyBySku.get(hcrdSku) : undefined) ?? 0;
+    const stock = bundleStock(components, hcrdBySku, transitBySku);
+    const hcrdAvailable = stock.currentCapacity;
     const tiktokAvailable = tiktok?.available ?? null;
-    const inTransit = transit?.inTransit ?? transit?.available ?? 0;
+    const inTransit = stock.inTransitCapacity;
+    const missingHcrd = stock.rows.some(({ available }) => available === null);
     rows.push({
-      id: `mapped:${hcrdSku}:${tiktokSku}`,
-      status: !hcrd ? "missing_hcrd" : !tiktok ? "missing_tiktok" : "mapped",
+      id: `mapped:${components.map(({ hcrdSku: sku }) => sku).join("+")}:${tiktokSku}`,
+      status: missingHcrd ? "missing_hcrd" : !tiktok ? "missing_tiktok" : "mapped",
+      mappingType: type,
       hcrdSku,
       tiktokSku,
+      components: stock.rows,
       hcrdAvailable,
       tiktokAvailable,
       inTransit,
       safetyStock: safety,
       discrepancy: hcrdAvailable !== null && tiktokAvailable !== null ? hcrdAvailable - tiktokAvailable : null,
       restockSuggestion: hcrdAvailable === null ? null : Math.max(0, safety - hcrdAvailable - inTransit),
-      evidence: [hcrd?.record?.evidence, tiktok?.record?.evidence, transit?.record?.evidence].filter(Boolean),
+      evidence: [mappingEntry.evidence, ...stock.rows.map(({ evidence }) => evidence), tiktok?.record?.evidence].filter(Boolean),
     });
   }
 
   for (const hcrdSku of hcrdBySku.keys()) {
-    if (skuMapping.has(hcrdSku)) continue;
+    if (skuMapping.mappedHcrdSkus.has(hcrdSku)) continue;
     rows.push({ id: `unmapped_hcrd:${hcrdSku}`, status: "unmapped_hcrd", hcrdSku, tiktokSku: null, evidence: [hcrdBySku.get(hcrdSku).record.evidence] });
   }
   for (const tiktokSku of tiktokBySku.keys()) {
-    if (mappedTikTokSkus.has(tiktokSku)) continue;
+    if (skuMapping.mappedTikTokSkus.has(tiktokSku)) continue;
     rows.push({ id: `unmapped_tiktok:${tiktokSku}`, status: "unmapped_tiktok", hcrdSku: null, tiktokSku, evidence: [tiktokBySku.get(tiktokSku).record.evidence] });
   }
 
@@ -145,8 +224,14 @@ export function reconcileInventorySnapshots({ hcrdSnapshot, tiktokSnapshot, inTr
     records: rows,
     summary: {
       recordsValid: true,
+      skuMappingVersion: skuMapping.version,
+      skuMappingStatus: skuMapping.status,
       capturedCount: rows.length,
       mappedCount: counts.mapped?.length ?? 0,
+      mappedHcrdSkuCount: skuMapping.mappedHcrdSkus.size,
+      mappedTikTokSkuCount: skuMapping.mappedTikTokSkus.size,
+      directMappedCount: rows.filter(({ status, mappingType }) => status === "mapped" && mappingType === "direct").length,
+      bundleMappedCount: rows.filter(({ status, mappingType }) => status === "mapped" && mappingType === "bundle").length,
       missingHcrdCount: counts.missing_hcrd?.length ?? 0,
       missingTikTokCount: counts.missing_tiktok?.length ?? 0,
       unmappedHcrdCount: counts.unmapped_hcrd?.length ?? 0,

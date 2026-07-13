@@ -87,3 +87,8 @@ visible page response from `/api/v1/product/stock/sku/list` until `total_sku_cou
 normalizes SKU and warehouse quantities, rejects duplicate or incomplete pagination, and asks the
 multimodal model to cross-check up to five visible rows. An empty `seller_sku` is preserved; downstream
 mapping must then use the stable TikTok `sku_id`.
+
+Inventory reconciliation accepts evidence-backed `direct` mappings and component-based `bundle`
+mappings. A bundle's HCRD availability is the number of complete sets its limiting component can
+form, never the sum of component stock. Mapping versions and evidence are preserved in the internal
+reconciliation snapshot; see `examples/shadow/inventory-reconcile.json` and the Estrella v1 mapping.
