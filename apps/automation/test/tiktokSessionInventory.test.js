@@ -71,8 +71,8 @@ function fakePage(allRows) {
   };
 }
 
-test("TikTok session inventory captures all 345 SKUs across seven visible API pages", async () => {
-  const rows = Array.from({ length: 345 }, (_, index) => rawSku(index + 1));
+test("TikTok session inventory captures the current 346-SKU baseline across seven visible API pages", async () => {
+  const rows = Array.from({ length: 346 }, (_, index) => rawSku(index + 1));
   const artifacts = [];
   const result = await readTikTokInventoryViaSession({
     page: fakePage(rows),
@@ -84,13 +84,13 @@ test("TikTok session inventory captures all 345 SKUs across seven visible API pa
     now: () => new Date("2026-07-13T00:00:00.000Z"),
   });
 
-  assert.equal(result.records.length, 345);
+  assert.equal(result.records.length, 346);
   assert.equal(result.summary.recordsValid, true);
-  assert.equal(result.summary.sourceTotalCount, 345);
+  assert.equal(result.summary.sourceTotalCount, 346);
   assert.equal(result.summary.pagesCaptured, 7);
   assert.equal(result.summary.source, "tiktok_session_api");
   assert.equal(artifacts.length, 7);
-  assert.equal(artifacts.at(-1).value.receivedRows, 45);
+  assert.equal(artifacts.at(-1).value.receivedRows, 46);
   assert.equal(result.records[0].sellerSku, "SELLER-1");
   assert.equal(result.records[1].sellerSku, null);
   assert.equal(result.records[0].totalStock, 31);

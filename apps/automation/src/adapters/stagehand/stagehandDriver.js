@@ -50,13 +50,103 @@ const HCRD_VISUAL_AUDIT_SCHEMA = z.object({
 const TIKTOK_VISUAL_AUDIT_SCHEMA = z.object({
   pageKind: z.enum(["inventory_list", "other"]),
   rows: z.array(z.object({
-    skuId: z.string().min(1),
+    skuId: z.string().regex(/^\d{19}$/),
     totalStock: z.number().int().nonnegative(),
     availableStock: z.number().int().nonnegative(),
     lockedStock: z.number().int().nonnegative(),
   })).max(5),
   warnings: z.array(z.string()).default([]),
 });
+
+export async function prepareTikTokVisualAuditView(page) {
+  const prepared = await page.evaluate(() => {
+    const styleId = "tk-saas-tiktok-visual-audit-style";
+    document.getElementById(styleId)?.remove();
+    document.querySelectorAll("[data-tk-saas-audit-sku-id]").forEach((element) => {
+      element.removeAttribute("data-tk-saas-audit-sku-id");
+    });
+    document.querySelectorAll("[data-tk-saas-audit-hidden]").forEach((element) => {
+      element.removeAttribute("data-tk-saas-audit-hidden");
+    });
+    const body = document.querySelector(".core-table-body");
+    const rows = [...(body?.querySelectorAll("tbody tr") || [])];
+    if (!body || !rows.length) return { prepared: false, reason: "inventory_rows_not_found" };
+
+    for (const row of rows.slice(0, 5)) {
+      const skuCell = row.querySelector("td:nth-child(2)");
+      if (!skuCell) continue;
+      const candidates = [...skuCell.querySelectorAll("*")]
+        .filter((element) => /SKU\s*ID\s*:/i.test(String(element.textContent || "")))
+        .sort((left, right) => String(left.textContent || "").length - String(right.textContent || "").length);
+      (candidates[0] || skuCell).setAttribute("data-tk-saas-audit-sku-id", "true");
+    }
+    for (const element of document.querySelectorAll("body *")) {
+      if (!/获取实用见解/.test(String(element.textContent || ""))) continue;
+      let candidate = element;
+      while (candidate.parentElement && getComputedStyle(candidate).position !== "fixed") candidate = candidate.parentElement;
+      if (getComputedStyle(candidate).position === "fixed") candidate.setAttribute("data-tk-saas-audit-hidden", "true");
+    }
+
+    const style = document.createElement("style");
+    style.id = styleId;
+    style.textContent = `
+      [data-tk-saas-audit-hidden="true"] { visibility: hidden !important; }
+      .core-table table { width: 100% !important; min-width: 0 !important; table-layout: fixed !important; }
+      .core-table thead tr:first-child > *:nth-child(n+6) { display: none !important; }
+      .core-table-body tbody tr > td:nth-child(n+7) { display: none !important; }
+      .core-table thead tr:first-child > *:nth-child(1),
+      .core-table-body tbody tr > td:nth-child(1) { width: 40px !important; min-width: 40px !important; }
+      .core-table thead tr:first-child > *:nth-child(2),
+      .core-table-body tbody tr > td:nth-child(2) { width: 480px !important; min-width: 480px !important; max-width: 480px !important; }
+      [data-tk-saas-audit-sku-id="true"], [data-tk-saas-audit-sku-id="true"] * {
+        display: block !important;
+        width: auto !important;
+        max-width: none !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        white-space: nowrap !important;
+      }
+    `;
+    document.head.appendChild(style);
+    (body.closest(".core-table") || body).scrollIntoView({ block: "start", inline: "nearest" });
+    return { prepared: true, rowCount: rows.length };
+  });
+  if (!prepared?.prepared) throw new Error(`TikTok visual audit view could not be prepared: ${JSON.stringify(prepared || {})}`);
+  await page.waitForTimeout(300);
+  const clip = await page.evaluate(() => {
+    const body = document.querySelector(".core-table-body");
+    const root = body?.closest(".core-table") || body?.parentElement;
+    const visibleRows = [...(body?.querySelectorAll("tbody tr") || [])]
+      .map((row) => ({ row, rect: row.getBoundingClientRect() }))
+      .filter(({ rect }) => rect.bottom > 0 && rect.top < innerHeight)
+      .slice(0, 5);
+    if (!root || !visibleRows.length) return null;
+    const rootRect = root.getBoundingClientRect();
+    const x = Math.max(0, rootRect.left);
+    const y = Math.max(0, rootRect.top);
+    const lastBottom = visibleRows.at(-1).rect.bottom;
+    return {
+      x,
+      y,
+      width: Math.max(1, Math.min(innerWidth - x, rootRect.width)),
+      height: Math.max(1, Math.min(innerHeight - y, lastBottom - y + 8)),
+    };
+  });
+  if (!clip) throw new Error("TikTok visual audit table clip could not be measured.");
+  return clip;
+}
+
+export async function clearTikTokVisualAuditView(page) {
+  await page.evaluate(() => {
+    document.getElementById("tk-saas-tiktok-visual-audit-style")?.remove();
+    document.querySelectorAll("[data-tk-saas-audit-sku-id]").forEach((element) => {
+      element.removeAttribute("data-tk-saas-audit-sku-id");
+    });
+    document.querySelectorAll("[data-tk-saas-audit-hidden]").forEach((element) => {
+      element.removeAttribute("data-tk-saas-audit-hidden");
+    });
+  }).catch(() => {});
+}
 
 function readExtractionInstruction(definition) {
   const base = `${definition.extractInstruction}\nReturn only one object matching the requested schema. Never omit required fields.`;
@@ -500,7 +590,7 @@ export class StagehandAutomationDriver {
     if (this.config.tiktokInventory?.visualAudit === false) {
       result.visualAudit = { ok: true, skipped: true, warnings: ["Visual audit disabled by configuration."] };
     } else {
-      const audit = await this.auditTikTokInventoryScreenshot();
+      const audit = await this.auditTikTokInventoryScreenshot({ artifactStore });
       result.visualAudit = compareTikTokVisualAudit(result.records, audit);
       if (!result.visualAudit.ok) {
         result.summary.recordsValid = false;
@@ -543,35 +633,46 @@ Return maxInventoryAge from 最大库龄, usableStock from 可用, and sellableS
     return HCRD_VISUAL_AUDIT_SCHEMA.parse(response.data);
   }
 
-  async auditTikTokInventoryScreenshot() {
+  async auditTikTokInventoryScreenshot({ artifactStore } = {}) {
     if (this.tiktokVisionAuditor) return this.tiktokVisionAuditor({ page: this.page });
     if (!this.localLlmClient) throw new Error("TikTok visual audit requires the configured multimodal model client.");
-    const buffer = await this.page.screenshot({ type: "jpeg", quality: 85, fullPage: false });
-    const response = await this.localLlmClient.createChatCompletion({
-      retries: 1,
-      options: {
-        messages: [
-          {
-            role: "system",
-            content: "You are a read-only visual auditor. Use only pixels in the supplied screenshot. Never propose or perform an action.",
+    const clip = await prepareTikTokVisualAuditView(this.page);
+    try {
+      const auditImagePath = await artifactStore?.prepareFile("extraction/tiktok-visual-audit-view.jpg");
+      const buffer = await this.page.screenshot({
+        type: "jpeg",
+        quality: 92,
+        clip,
+        ...(auditImagePath ? { path: auditImagePath } : {}),
+      });
+      const response = await this.localLlmClient.createChatCompletion({
+        retries: 1,
+        options: {
+          messages: [
+            {
+              role: "system",
+              content: "You are a read-only visual auditor. Use only pixels in the supplied screenshot. Never propose or perform an action.",
+            },
+            {
+              role: "user",
+              content: "Determine whether this is TikTok Shop's SKU inventory table. If it is, transcribe up to five clearly visible rows. Each SKU ID must be copied as exactly 19 digits with no ellipsis. For each row return the exact values under 总库存 and 可用; return 已锁定 as the sum of the visible 预留 and 订单占用 values. Do not use 销量, 销量预测, 建议补货数量, or 可供应天数 as inventory values. Do not guess obscured values.",
+            },
+          ],
+          image: {
+            buffer,
+            description: "Cropped TikTok Shop SKU inventory table with the real page's SKU ID truncation temporarily removed for a read-only API-to-UI consistency audit.",
           },
-          {
-            role: "user",
-            content: "Determine whether this is TikTok Shop's SKU inventory list. If it is, transcribe up to five clearly visible rows. For each row return the visible SKU ID and the exact values under 总库存, 可用, and 已锁定. Do not use 销量, 销量预测, 建议补货数量, or 可供应天数 as inventory values. Do not guess obscured values.",
+          response_model: {
+            name: "tiktok_inventory_visual_audit",
+            schema: TIKTOK_VISUAL_AUDIT_SCHEMA,
           },
-        ],
-        image: {
-          buffer,
-          description: "Current TikTok Shop SKU inventory screenshot for a read-only API-to-UI consistency audit.",
+          maxOutputTokens: 1_024,
         },
-        response_model: {
-          name: "tiktok_inventory_visual_audit",
-          schema: TIKTOK_VISUAL_AUDIT_SCHEMA,
-        },
-        maxOutputTokens: 1_024,
-      },
-    });
-    return TIKTOK_VISUAL_AUDIT_SCHEMA.parse(response.data);
+      });
+      return TIKTOK_VISUAL_AUDIT_SCHEMA.parse(response.data);
+    } finally {
+      await clearTikTokVisualAuditView(this.page);
+    }
   }
 
   async runInventoryRead({ definition, schema, artifactStore }) {
