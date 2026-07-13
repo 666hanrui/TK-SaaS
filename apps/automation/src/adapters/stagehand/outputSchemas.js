@@ -43,6 +43,18 @@ const inventoryRecord = record.extend({
 
 const inventoryListOutput = z.object({ records: z.array(inventoryRecord), summary });
 
+const hcrdInventoryRecord = record.extend({
+  evidence: z.array(z.object({ sourceText: z.string().min(1) })).min(1),
+  sellerSku: z.string().min(1),
+  warehouse: z.string().min(1),
+  owner: z.string().nullable().optional(),
+  totalStock: z.number().int().nonnegative(),
+  availableStock: z.number().int().nonnegative(),
+  lockedStock: z.number().int().nonnegative(),
+});
+
+const hcrdInventoryListOutput = z.object({ records: z.array(hcrdInventoryRecord), summary });
+
 const detailOutput = z
   .object({
     id: z.string().min(1),
@@ -60,6 +72,7 @@ export const stagehandOutputSchemas = Object.freeze({
   evidence_manifest: listOutput,
   review_list: listOutput,
   review_detail: detailOutput,
+  hcrd_inventory_list: hcrdInventoryListOutput,
   inventory_list: inventoryListOutput,
   in_transit_list: listOutput,
   creator_list: listOutput,

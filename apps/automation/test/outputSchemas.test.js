@@ -44,3 +44,36 @@ test("inventory schema requires typed SKU stock fields", () => {
     /skuId|totalStock|availableStock|lockedStock/,
   );
 });
+
+test("HCRD inventory schema requires seller SKU, warehouse, and typed stock fields", () => {
+  const valid = stagehandOutputSchemas.hcrd_inventory_list.parse({
+    records: [
+      {
+        id: "SELLER-SKU-1",
+        sellerSku: "SELLER-SKU-1",
+        warehouse: "US Warehouse",
+        owner: null,
+        totalStock: 12,
+        availableStock: 10,
+        lockedStock: 2,
+        evidence: [{ sourceText: "US Warehouse | SELLER-SKU-1 | 12 | 10 | 2" }],
+      },
+    ],
+    summary,
+  });
+
+  assert.equal(valid.records[0].sellerSku, "SELLER-SKU-1");
+  assert.throws(
+    () =>
+      stagehandOutputSchemas.hcrd_inventory_list.parse({
+        records: [
+          {
+            id: "SELLER-SKU-1",
+            evidence: [{ sourceText: "SELLER-SKU-1 | 12 | 10 | 2" }],
+          },
+        ],
+        summary,
+      }),
+    /sellerSku|warehouse|totalStock|availableStock|lockedStock/,
+  );
+});

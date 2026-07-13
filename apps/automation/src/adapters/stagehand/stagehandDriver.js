@@ -11,6 +11,7 @@ const LIST_OUTPUT_SCHEMA_KEYS = new Set([
   "aftersales_list",
   "evidence_manifest",
   "review_list",
+  "hcrd_inventory_list",
   "inventory_list",
   "in_transit_list",
   "creator_list",
