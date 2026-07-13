@@ -19,6 +19,7 @@
     "inventory:reconcile": "node src/cli/remote-inventory-reconcile.mjs",
     "dispatch": "node src/cli/remote-dispatch.mjs",
     "profile:open": "node src/cli/open-profile.mjs",
+    "diagnose:tiktok-inventory-api": "node src/cli/diagnose-tiktok-inventory-api.mjs",
     "test": "node --test"
   },
   "dependencies": {
