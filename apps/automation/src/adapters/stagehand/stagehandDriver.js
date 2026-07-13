@@ -19,11 +19,13 @@ const LIST_OUTPUT_SCHEMA_KEYS = new Set([
   "message_list",
 ]);
 const EXTRACTION_SCOPE_PATTERNS = Object.freeze({
-  inventory_list: /(?:tab panel|panel|list|table|grid).*(?:product|inventory)|(?:product|inventory).*(?:tab panel|panel|list|table|grid)/i,
   order_list: /(?:tab panel|panel|list|table|grid).*(?:order)|(?:order).*(?:tab panel|panel|list|table|grid)/i,
   aftersales_list: /(?:tab panel|panel|list|table|grid).*(?:after.?sales|return|refund|case)|(?:after.?sales|return|refund|case).*(?:tab panel|panel|list|table|grid)/i,
 });
 const EXTRACTION_SCOPE_ATTRIBUTE = "data-tk-saas-extraction-scope";
+const EXTRACTION_ROW_ATTRIBUTE = "data-tk-saas-extraction-row";
+const EXTRACTION_IGNORE_ATTRIBUTE = "data-tk-saas-extraction-ignore";
+const INVENTORY_BATCH_SIZE = 10;
 
 function readExtractionInstruction(definition) {
   const base = `${definition.extractInstruction}\nReturn only one object matching the requested schema. Never omit required fields.`;
@@ -51,55 +53,103 @@ function readExtractionOptions(definition, observation, timeout) {
   };
 }
 
-async function prepareDeterministicReadScope(page, definition, observation) {
-  if (!page?.evaluate || definition.outputSchemaKey !== "inventory_list") return undefined;
-  const scopeValue = definition.outputSchemaKey;
-  const searchCandidate = observation?.candidates?.find(
-    (candidate) => candidate.selector && /search.*(?:product|商品).*(?:SKU|ID)|(?:SKU|ID).*search.*(?:product|商品)/i.test(String(candidate.description || "")),
-  );
-  const anchorXPath = String(searchCandidate?.selector || "").replace(/^xpath=/i, "");
-  const scope = await page.evaluate(
-    ({ attribute, value, anchorXPath: requestedAnchorXPath }) => {
-      document.querySelectorAll(`[${attribute}]`).forEach((element) => element.removeAttribute(attribute));
-      const xpathAnchor = requestedAnchorXPath
-        ? document.evaluate(requestedAnchorXPath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue
-        : null;
-      const anchor = xpathAnchor || [...document.querySelectorAll("input")].find((input) => {
-          const label = `${input.getAttribute("placeholder") || ""} ${input.getAttribute("aria-label") || ""}`;
-          return /商品|product/i.test(label) && /SKU|ID/i.test(label);
-        });
-      if (!anchor) return { prepared: false, reason: "product_search_anchor_not_found" };
-
-      let element = anchor.parentElement;
-      while (element && element !== document.body) {
-        const text = String(element.innerText || element.textContent || "").replace(/\s+/g, " ").trim();
-        const containsInventoryTable = /商品|product/i.test(text) && /状态|status/i.test(text) && /库存|stock|inventory/i.test(text);
-        const containsRows = /ID\s*[:：]?\s*\d{5,}/i.test(text) || element.querySelectorAll("[role='row'], tbody tr").length > 1;
-        if (containsInventoryTable && (containsRows || text.length >= 800)) {
-          element.setAttribute(attribute, value);
-          return {
-            prepared: true,
-            textLength: text.length,
-            rowCount: element.querySelectorAll("[role='row'], tbody tr").length,
-          };
-        }
-        element = element.parentElement;
+async function prepareInventoryReadScope(page) {
+  if (!page?.evaluate) return { prepared: false, reason: "page_evaluate_unavailable" };
+  return page.evaluate(
+    ({ scopeAttribute, rowAttribute, ignoreAttribute }) => {
+      for (const attribute of [scopeAttribute, rowAttribute, ignoreAttribute]) {
+        document.querySelectorAll(`[${attribute}]`).forEach((element) => element.removeAttribute(attribute));
       }
-      return { prepared: false, reason: "inventory_table_ancestor_not_found" };
+      if (location.pathname !== "/product/stock") {
+        return { prepared: false, reason: "unexpected_inventory_path", pathname: location.pathname };
+      }
+      const body = document.querySelector(".core-table-body");
+      if (!body) return { prepared: false, reason: "core_table_body_not_found" };
+      const rows = [...body.querySelectorAll("tbody tr")];
+      if (!rows.length) return { prepared: false, reason: "inventory_rows_not_loaded" };
+      const container = body.closest(".core-table") || body.parentElement || body;
+      container.setAttribute(scopeAttribute, "inventory_list");
+      rows.forEach((row, index) => row.setAttribute(rowAttribute, String(index)));
+      return {
+        prepared: true,
+        rowCount: rows.length,
+        textLength: String(body.innerText || body.textContent || "").length,
+      };
     },
-    { attribute: EXTRACTION_SCOPE_ATTRIBUTE, value: scopeValue, anchorXPath },
+    {
+      scopeAttribute: EXTRACTION_SCOPE_ATTRIBUTE,
+      rowAttribute: EXTRACTION_ROW_ATTRIBUTE,
+      ignoreAttribute: EXTRACTION_IGNORE_ATTRIBUTE,
+    },
   );
-  return {
-    selector: scope?.prepared ? `[${EXTRACTION_SCOPE_ATTRIBUTE}="${scopeValue}"]` : undefined,
-    diagnostic: scope,
-  };
 }
 
-async function clearDeterministicReadScope(page) {
+async function selectInventoryBatch(page, start, end) {
+  return page.evaluate(
+    ({ rowAttribute, ignoreAttribute, startIndex, endIndex }) => {
+      const rows = [...document.querySelectorAll(`[${rowAttribute}]`)];
+      rows.forEach((row) => {
+        const index = Number(row.getAttribute(rowAttribute));
+        if (index >= startIndex && index < endIndex) row.removeAttribute(ignoreAttribute);
+        else row.setAttribute(ignoreAttribute, "true");
+      });
+      return rows.filter((row) => !row.hasAttribute(ignoreAttribute)).length;
+    },
+    {
+      rowAttribute: EXTRACTION_ROW_ATTRIBUTE,
+      ignoreAttribute: EXTRACTION_IGNORE_ATTRIBUTE,
+      startIndex: start,
+      endIndex: end,
+    },
+  );
+}
+
+async function clearInventoryReadScope(page) {
   if (!page?.evaluate) return;
-  await page.evaluate((attribute) => {
-    document.querySelectorAll(`[${attribute}]`).forEach((element) => element.removeAttribute(attribute));
-  }, EXTRACTION_SCOPE_ATTRIBUTE);
+  await page.evaluate((attributes) => {
+    for (const attribute of attributes) {
+      document.querySelectorAll(`[${attribute}]`).forEach((element) => element.removeAttribute(attribute));
+    }
+  }, [EXTRACTION_SCOPE_ATTRIBUTE, EXTRACTION_ROW_ATTRIBUTE, EXTRACTION_IGNORE_ATTRIBUTE]);
+}
+
+function inventoryBatchInstruction(definition, start, end, total) {
+  return `${readExtractionInstruction(definition)}
+This is TikTok Shop's dedicated SKU stock page. Extract exactly one record per selected SKU table row, covering rows ${start + 1}-${end} of ${total}.
+Use the visible numeric SKU ID as both "id" and "skuId". Also extract productTitle, variation, totalStock, availableStock, lockedStock, stockAlert, autoRestock, sales30d, forecast30d, recommendedRestock30d, supplyDays, reservedStock, and orderOccupiedStock when visible.
+The table columns are: SKU, total stock, available, locked, stock alert, auto restock, sales in the last 30 days, forecast for the next 30 days, recommended restock for the next 30 days, supply days, operation, reserved, and order occupied.
+Do not include rows outside this selected batch. The independent Seller SKU is not displayed, so do not invent it.`;
+}
+
+function mergeInventoryBatches(batchResults, expectedCount) {
+  const recordsById = new Map();
+  const duplicateIds = new Set();
+  const warnings = [];
+  let batchesValid = true;
+
+  batchResults.forEach((result, index) => {
+    if (result?.summary?.recordsValid !== true) batchesValid = false;
+    for (const warning of result?.summary?.warnings || []) warnings.push(`Batch ${index + 1}: ${warning}`);
+    for (const record of result?.records || []) {
+      if (recordsById.has(record.id)) duplicateIds.add(record.id);
+      else recordsById.set(record.id, record);
+    }
+  });
+
+  const records = [...recordsById.values()];
+  if (duplicateIds.size) warnings.push(`Duplicate SKU IDs across batches: ${[...duplicateIds].join(", ")}`);
+  if (records.length !== expectedCount) {
+    warnings.push(`Expected ${expectedCount} SKU rows but captured ${records.length} unique SKU IDs.`);
+  }
+  return {
+    records,
+    summary: {
+      recordsValid: batchesValid && duplicateIds.size === 0 && records.length === expectedCount,
+      visibleCount: expectedCount,
+      capturedCount: records.length,
+      warnings,
+    },
+  };
 }
 
 function normalizeCandidate(action, pageFingerprint) {
@@ -227,19 +277,44 @@ export class StagehandAutomationDriver {
   async runRead({ definition, observation }) {
     const schema = this.schemaRegistry[definition.outputSchemaKey];
     if (!schema) throw new Error(`No extraction schema registered for ${definition.id}`);
-    const deterministicScope = await prepareDeterministicReadScope(this.page, definition, observation);
-    const deterministicSelector = deterministicScope?.selector;
-    const options = readExtractionOptions(definition, observation, this.config.llm.timeoutMs);
-    if (deterministicSelector) options.selector = deterministicSelector;
-    if (definition.outputSchemaKey === "inventory_list" && !deterministicSelector && options.selector === "main") {
-      throw new Error(
-        `Inventory extraction scope was not found; refusing full-page extraction: ${JSON.stringify(deterministicScope?.diagnostic || {})}`,
-      );
+    if (definition.outputSchemaKey === "inventory_list") {
+      return this.runInventoryRead({ definition, schema });
     }
+    const options = readExtractionOptions(definition, observation, this.config.llm.timeoutMs);
+    return this.stagehand.extract(readExtractionInstruction(definition), schema, options);
+  }
+
+  async runInventoryRead({ definition, schema }) {
+    let scope;
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      scope = await prepareInventoryReadScope(this.page);
+      if (scope.prepared) break;
+      if (scope.reason !== "inventory_rows_not_loaded") break;
+      await this.page.waitForTimeout?.(500);
+    }
+    if (!scope?.prepared) {
+      throw new Error(`Inventory extraction scope was not found: ${JSON.stringify(scope || {})}`);
+    }
+
+    const batchResults = [];
     try {
-      return await this.stagehand.extract(readExtractionInstruction(definition), schema, options);
+      for (let start = 0; start < scope.rowCount; start += INVENTORY_BATCH_SIZE) {
+        const end = Math.min(start + INVENTORY_BATCH_SIZE, scope.rowCount);
+        const selectedCount = await selectInventoryBatch(this.page, start, end);
+        if (selectedCount !== end - start) {
+          throw new Error(`Inventory batch selection mismatch for rows ${start + 1}-${end}: selected ${selectedCount}.`);
+        }
+        batchResults.push(
+          await this.stagehand.extract(inventoryBatchInstruction(definition, start, end, scope.rowCount), schema, {
+            timeout: this.config.llm.timeoutMs,
+            selector: `[${EXTRACTION_SCOPE_ATTRIBUTE}="inventory_list"]`,
+            ignoreSelectors: [`[${EXTRACTION_IGNORE_ATTRIBUTE}]`],
+          }),
+        );
+      }
+      return mergeInventoryBatches(batchResults, scope.rowCount);
     } finally {
-      if (deterministicSelector) await clearDeterministicReadScope(this.page);
+      await clearInventoryReadScope(this.page);
     }
   }
 

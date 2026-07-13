@@ -35,40 +35,7 @@ test("list extraction explicitly defines a verified empty-state result", async (
   assert.equal(call.options.selector, "main");
 });
 
-test("inventory extraction scopes the model context to the observed product list", async () => {
-  const driver = new StagehandAutomationDriver({
-    config: { llm: { timeoutMs: 90_000 } },
-    schemaRegistry: { inventory_list: { schema: "inventory-list" } },
-  });
-  let options;
-  driver.stagehand = {
-    async extract(_instruction, _schema, value) {
-      options = value;
-      return { records: [], summary: { recordsValid: true, capturedCount: 0, warnings: [] } };
-    },
-  };
-
-  await driver.runRead({
-    definition: {
-      id: "tiktok.inventory.sync",
-      outputSchemaKey: "inventory_list",
-      extractInstruction: "Extract visible inventory.",
-    },
-    observation: {
-      candidates: [
-        { description: "Button to add a product.", selector: "xpath=/irrelevant" },
-        {
-          description: "Tab panel displaying the list of active products.",
-          selector: "xpath=/html/body/main/div[2]/div[4]",
-        },
-      ],
-    },
-  });
-
-  assert.equal(options.selector, "xpath=/html/body/main/div[2]/div[4]");
-});
-
-test("inventory extraction prefers a deterministic DOM scope and clears it afterward", async () => {
+test("inventory extraction processes the dedicated stock table in bounded SKU batches", async () => {
   const driver = new StagehandAutomationDriver({
     config: { llm: { timeoutMs: 90_000 } },
     schemaRegistry: { inventory_list: { schema: "inventory-list" } },
@@ -77,51 +44,61 @@ test("inventory extraction prefers a deterministic DOM scope and clears it after
   driver.page = {
     async evaluate(_callback, argument) {
       pageEvaluations.push(argument);
-      return typeof argument === "object" ? { prepared: true, textLength: 1200, rowCount: 4 } : undefined;
+      if (Array.isArray(argument)) return undefined;
+      if (Object.hasOwn(argument, "startIndex")) return argument.endIndex - argument.startIndex;
+      return { prepared: true, rowCount: 25, textLength: 7_500 };
     },
   };
-  let options;
+  const calls = [];
   driver.stagehand = {
-    async extract(_instruction, _schema, value) {
-      options = value;
-      return { records: [], summary: { recordsValid: true, capturedCount: 0, warnings: [] } };
+    async extract(instruction, _schema, options) {
+      const batchIndex = calls.length;
+      const count = batchIndex < 2 ? 10 : 5;
+      const records = Array.from({ length: count }, (_, offset) => {
+        const id = String(1_732_000_000_000_000_000n + BigInt(batchIndex * 10 + offset));
+        return { id, skuId: id, evidence: [{ sourceText: `SKU ID: ${id}` }] };
+      });
+      calls.push({ instruction, options });
+      return { records, summary: { recordsValid: true, capturedCount: records.length, warnings: [] } };
     },
   };
 
-  await driver.runRead({
+  const result = await driver.runRead({
     definition: {
       id: "tiktok.inventory.sync",
       outputSchemaKey: "inventory_list",
       extractInstruction: "Extract visible inventory.",
     },
-    observation: {
-      candidates: [
-        {
-          description: "Text input field for searching products by name, ID, or SKU.",
-          selector: "xpath=/html/body/main/div/input",
-        },
-      ],
-    },
   });
 
-  assert.equal(options.selector, '[data-tk-saas-extraction-scope="inventory_list"]');
-  assert.equal(pageEvaluations.length, 2);
-  assert.deepEqual(pageEvaluations[0], {
-    attribute: "data-tk-saas-extraction-scope",
-    value: "inventory_list",
-    anchorXPath: "/html/body/main/div/input",
+  assert.equal(calls.length, 3);
+  assert.match(calls[0].instruction, /rows 1-10 of 25/);
+  assert.match(calls[2].instruction, /rows 21-25 of 25/);
+  assert.equal(calls[0].options.selector, '[data-tk-saas-extraction-scope="inventory_list"]');
+  assert.deepEqual(calls[0].options.ignoreSelectors, ['[data-tk-saas-extraction-ignore]']);
+  assert.equal(result.records.length, 25);
+  assert.deepEqual(result.summary, {
+    recordsValid: true,
+    visibleCount: 25,
+    capturedCount: 25,
+    warnings: [],
   });
-  assert.equal(pageEvaluations[1], "data-tk-saas-extraction-scope");
+  assert.equal(pageEvaluations.filter((value) => value?.startIndex !== undefined).length, 3);
+  assert.deepEqual(pageEvaluations.at(-1), [
+    "data-tk-saas-extraction-scope",
+    "data-tk-saas-extraction-row",
+    "data-tk-saas-extraction-ignore",
+  ]);
 });
 
-test("inventory extraction refuses a full-page fallback when deterministic scoping misses", async () => {
+test("inventory extraction refuses to use a non-stock page or an unbounded fallback", async () => {
   const driver = new StagehandAutomationDriver({
     config: { llm: { timeoutMs: 90_000 } },
     schemaRegistry: { inventory_list: { schema: "inventory-list" } },
   });
   driver.page = {
     async evaluate() {
-      return { prepared: false, reason: "product_search_anchor_not_found" };
+      return { prepared: false, reason: "unexpected_inventory_path", pathname: "/product/manage" };
     },
   };
   driver.stagehand = {
@@ -139,7 +116,7 @@ test("inventory extraction refuses a full-page fallback when deterministic scopi
       },
       observation: { candidates: [] },
     }),
-    /product_search_anchor_not_found/,
+    /unexpected_inventory_path/,
   );
 });
 
