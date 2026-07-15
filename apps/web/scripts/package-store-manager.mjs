@@ -19,6 +19,7 @@ const packageRoot = path.join(stagingRoot, packageName);
 const zipPath = path.join(outputRoot, `${packageName}.zip`);
 const checksumPath = `${zipPath}.sha256`;
 const seed = JSON.parse(await readFile(path.join(webRoot, "src", "lib", "echotikRealSeed.json"), "utf8"));
+const sourcePackageJson = JSON.parse(await readFile(path.join(webRoot, "package.json"), "utf8"));
 
 if (!Array.isArray(seed) || seed.length < 188) {
   throw new Error(`tracked creator seed is incomplete: ${Array.isArray(seed) ? seed.length : 0}`);
@@ -37,12 +38,27 @@ for (const filename of [
   ".env.store-manager.example",
   "index.html",
   "package-lock.json",
-  "package.json",
   "server.mjs",
   "vite.config.mjs",
 ]) {
   await cp(path.join(webRoot, filename), path.join(packagedWebRoot, filename));
 }
+await writeFile(
+  path.join(packagedWebRoot, "package.json"),
+  `${JSON.stringify(
+    {
+      ...sourcePackageJson,
+      scripts: {
+        build: sourcePackageJson.scripts.build,
+        "start:manager": sourcePackageJson.scripts["start:manager"],
+        "creator:check": sourcePackageJson.scripts["creator:check"],
+      },
+    },
+    null,
+    2,
+  )}\n`,
+  "utf8",
+);
 await cp(path.join(webRoot, "dist"), path.join(packagedWebRoot, "dist"), { recursive: true });
 await cp(path.join(webRoot, "src"), path.join(packagedWebRoot, "src"), {
   recursive: true,
