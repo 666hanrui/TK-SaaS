@@ -1,0 +1,14 @@
+{
+  "definitionId": "echotik.creators.read_detail",
+  "sourceTaskId": "shadow:echotik-creator-detail:<creator-id>:<YYYY-MM-DD>",
+  "entityId": "creator:echotik:<creator-id>",
+  "requestedBy": "store-operations",
+  "target": {
+    "url": "<EchoTik-达人详情URL>",
+    "accountId": "echotik-main",
+    "profileId": "echotik-main"
+  },
+  "input": {
+    "creatorId": "<creator-id>"
+  }
+}

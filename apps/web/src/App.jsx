@@ -52,6 +52,7 @@ import {
   getPriorityLabel,
   getStatusLabel,
   groupTasksByShift,
+  mergeCreatorRecords,
   updateCreatorStatus,
 } from "./lib/operations";
 import { normalizeEchoTikCreatorRows, parseEchoTikCreatorImport } from "./lib/echotikImport";
@@ -113,7 +114,7 @@ const filterPriorities = [
   { value: "low", label: "低" },
 ];
 
-const creatorNow = new Date("2026-07-07T09:00:00+08:00");
+const creatorNow = new Date();
 const creatorStorageKey = "tk-saas.creatorLeads.v1";
 const demoCreatorIds = new Set(demoCreatorLeads.map((creator) => creator.id));
 const realSeedCreatorIds = new Set(realEchoTikCreatorLeads.map((creator) => creator.id));
@@ -503,6 +504,12 @@ function Sidebar({ activeSection, onSelect }) {
 
 function Topbar({ activeSection, onOpenImport, onSyncEchoTik, isSyncing, lastSync }) {
   const isCreatorPage = activeSection === "creators";
+  const todayLabel = new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+  }).format(new Date());
 
   return (
     <header className="topbar">
@@ -516,7 +523,7 @@ function Topbar({ activeSection, onOpenImport, onSyncEchoTik, isSyncing, lastSyn
       </div>
       <div className="topbar-actions">
         <button className="topbar-chip" type="button">
-          2026-07-07（周二）
+          {todayLabel}
           <Clock3 size={15} />
         </button>
         {isCreatorPage ? (
@@ -915,11 +922,13 @@ function CreatorPage({
   filters,
   onClearImported,
   onCopyHandle,
+  onExport,
   onFilterChange,
   onImport,
   onSelectCreator,
   onStarToggle,
   selectedCreatorId,
+  storeStatus,
 }) {
   const metrics = calculateCreatorMetrics(creators, creatorNow);
   const visibleCreators = filterCreatorLeads(creators, filters, creatorNow);
@@ -943,6 +952,13 @@ function CreatorPage({
           </span>
         </div>
         <div className="creator-command-actions">
+          <span className={`creator-store-status ${storeStatus.tone}`}>
+            {storeStatus.label}
+          </span>
+          <button className="secondary-action" onClick={onExport} type="button">
+            <FileSpreadsheet size={18} />
+            导出备份
+          </button>
           <button className="primary-action" onClick={onImport} type="button">
             <UploadCloud size={18} />
             导入 CSV/Excel
@@ -1168,6 +1184,7 @@ function CreatorDetailDrawer({
   onConfirmOutreachDraft,
   onContactChange,
   onCopyOutreachDraft,
+  onDraftChange,
   onQueueOutreachDraft,
   onRecordOutreachSent,
   onStatusChange,
@@ -1190,6 +1207,12 @@ function CreatorDetailDrawer({
   const outreachStatus = outreach?.status || "not_started";
   const canConfirmDraft = outreachStatus === "draft_ready" && Boolean(outreach?.draft);
   const canRecordSent = outreachStatus === "confirmed";
+  const outreachSubject =
+    outreach?.subject || `Collaboration with ${creator.displayName || creator.handle || "your content"}`;
+  const emailDraftUrl =
+    creator.contact?.email && outreach?.draft
+      ? `mailto:${encodeURIComponent(creator.contact.email.trim())}?subject=${encodeURIComponent(outreachSubject)}&body=${encodeURIComponent(outreach.draft)}`
+      : "";
   const checklist = [
     ["打开 TikTok 主页", Boolean(profileUrl)],
     ["确认公开邮箱", Boolean(creator.contact?.email)],
@@ -1349,7 +1372,7 @@ function CreatorDetailDrawer({
             </Pill>
           </div>
           <div className="outreach-status-grid">
-            <Field label="执行模式" value="Dry-run 草稿，不自动发送" />
+            <Field label="执行模式" value="模型生成草稿，人工确认发送" />
             <Field label="联系渠道" value={creator.contact?.email ? "Email" : instagramUrl ? "Instagram" : "人工补充"} />
             <Field label="队列来源" value={outreach?.source || "待提交"} />
             <Field label="队列 ID" value={outreach?.queueId || "--"} />
@@ -1366,12 +1389,24 @@ function CreatorDetailDrawer({
             <Field label="更新时间" value={outreach?.updatedAt ? formatShortDate(outreach.updatedAt) : "--"} />
           </div>
           {outreach?.draft ? (
-            <pre className="outreach-draft">{outreach.draft}</pre>
+            <label className="outreach-draft-editor">
+              <span>发送前可直接修改</span>
+              <textarea
+                onChange={(event) => onDraftChange(creator.id, event.target.value)}
+                value={outreach.draft}
+              />
+            </label>
           ) : (
             <p>点击生成草稿后，系统会把达人证据和联系方式写入本地队列；如配置 n8n webhook，会同步请求 n8n 生成草稿。</p>
           )}
           {outreach?.error ? <p className="outreach-error">{outreach.error}</p> : null}
           <div className="outreach-action-row">
+            {emailDraftUrl ? (
+              <a className="inline-automation secondary" href={emailDraftUrl}>
+                <Mail size={16} />
+                打开邮件草稿
+              </a>
+            ) : null}
             {instagramUrl ? (
               <a className="inline-automation secondary" href={instagramUrl} rel="noreferrer" target="_blank">
                 <ExternalLink size={16} />
@@ -1669,7 +1704,10 @@ function ImportModal({ onClose, onCreatorImport, variant = "operations" }) {
 }
 
 export function App() {
-  const [activeSection, setActiveSection] = useState("dashboard");
+  const [activeSection, setActiveSection] = useState(() => {
+    const requested = new URLSearchParams(window.location.search).get("section");
+    return getNavigationItems().some((item) => item.id === requested) ? requested : "dashboard";
+  });
   const [taskList, setTaskList] = useState(initialTasks);
   const [creatorList, setCreatorList] = useState(loadSavedCreatorLeads);
   const [selectedTaskId, setSelectedTaskId] = useState(initialTasks[0]?.id);
@@ -1688,6 +1726,11 @@ export function App() {
     search: "",
   });
   const [creatorAutomationBusyId, setCreatorAutomationBusyId] = useState(null);
+  const [creatorStoreReady, setCreatorStoreReady] = useState(false);
+  const [creatorStoreStatus, setCreatorStoreStatus] = useState({
+    tone: "loading",
+    label: "正在读取本地达人库",
+  });
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSync, setLastSync] = useState("");
 
@@ -1699,7 +1742,36 @@ export function App() {
     creatorList.find((creator) => creator.id === selectedCreatorId) ?? creatorList[0];
 
   useEffect(() => {
-    setCreatorList((current) => mergeRealCreatorLeads(current));
+    let cancelled = false;
+
+    fetch("/api/local/creators")
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.ok === false || !Array.isArray(payload.creators)) {
+          throw new Error(payload.message || "本地达人库读取失败");
+        }
+        if (cancelled) return;
+        setCreatorList(mergeRealCreatorLeads(payload.creators));
+        setCreatorStoreStatus({
+          tone: "saved",
+          label: `本地已保存 ${payload.creators.length} 人`,
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCreatorList((current) => mergeRealCreatorLeads(current));
+        setCreatorStoreStatus({
+          tone: "warning",
+          label: "服务未连接，暂用浏览器缓存",
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setCreatorStoreReady(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -1711,25 +1783,47 @@ export function App() {
   }, [creatorList]);
 
   useEffect(() => {
-    if (creatorList.length === 0) {
+    if (!creatorStoreReady || creatorList.length === 0) {
       return undefined;
     }
 
+    setCreatorStoreStatus({ tone: "saving", label: "正在保存到店长电脑" });
     const backupTimer = window.setTimeout(() => {
-      fetch("/api/local/creator-backup", {
-        method: "POST",
+      fetch("/api/local/creators", {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           source: "tk-saas-creator-workbench",
+          reason: "autosave",
           creators: creatorList,
         }),
-      }).catch(() => {
-        // Disk backup is best-effort in dev; localStorage still preserves the UI state.
-      });
+      })
+        .then(async (response) => {
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || payload.ok === false) {
+            throw new Error(payload.message || "保存失败");
+          }
+          setCreatorStoreStatus({
+            tone: "saved",
+            label: `本地已保存 ${creatorList.length} 人`,
+          });
+        })
+        .catch(() => {
+          setCreatorStoreStatus({
+            tone: "warning",
+            label: "磁盘保存失败，仍保留浏览器缓存",
+          });
+        });
     }, 700);
 
     return () => window.clearTimeout(backupTimer);
-  }, [creatorList]);
+  }, [creatorList, creatorStoreReady]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("section", activeSection);
+    window.history.replaceState({}, "", url);
+  }, [activeSection]);
 
   useEffect(() => {
     if (creatorList.length === 0) {
@@ -1772,6 +1866,26 @@ export function App() {
               contact: {
                 ...creator.contact,
                 [field]: value,
+              },
+            }
+          : creator,
+      ),
+    );
+  }
+
+  function updateCreatorOutreachDraft(creatorId, draft) {
+    setCreatorList((current) =>
+      current.map((creator) =>
+        creator.id === creatorId
+          ? {
+              ...creator,
+              automation: {
+                ...creator.automation,
+                outreach: {
+                  ...creator.automation?.outreach,
+                  draft,
+                  updatedAt: new Date().toISOString(),
+                },
               },
             }
           : creator,
@@ -1850,7 +1964,12 @@ export function App() {
         dryRun: true,
         allowSend: false,
       },
-      (result) => (result.n8nConfigured ? "n8n 草稿已生成并回写" : "Dry-run 草稿已生成，队列已落盘"),
+      (result) =>
+        result.source === "model-computer"
+          ? "模型电脑已生成草稿，等待人工确认"
+          : result.n8nConfigured
+            ? "n8n 草稿已生成并回写"
+            : "模型暂不可用，已生成本地兜底草稿",
       "草稿生成",
     );
   }
@@ -1871,6 +1990,7 @@ export function App() {
       confirmedAt,
       confirmedBy: "operator",
       draft,
+      subject: creator.automation?.outreach?.subject,
     });
 
     await submitCreatorAutomationAction(
@@ -1903,7 +2023,9 @@ export function App() {
       confirmedAt: outreach.confirmedAt,
       confirmedBy: outreach.confirmedBy || "operator",
       draft: outreach.draft,
-      subject: `Collaboration with ${creator.displayName || creator.handle || "your content"}`,
+      subject:
+        outreach.subject ||
+        `Collaboration with ${creator.displayName || creator.handle || "your content"}`,
     });
 
     await submitCreatorAutomationAction(
@@ -1959,15 +2081,25 @@ export function App() {
     }
   }
 
-  function importCreatorLeads(importedCreators, fileName) {
-    setCreatorList((current) => {
-      const incomingById = new Map(importedCreators.map((creator) => [creator.id, creator]));
-      const updatedCurrent = current.map((creator) => incomingById.get(creator.id) ?? creator);
-      const existingIds = new Set(current.map((creator) => creator.id));
-      const newItems = importedCreators.filter((creator) => !existingIds.has(creator.id));
-
-      return [...updatedCurrent, ...newItems];
+  function exportCreatorBackup() {
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      count: creatorList.length,
+      creators: creatorList,
+    };
+    const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], {
+      type: "application/json;charset=utf-8",
     });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `tk-saas-creators-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    showToast(`已导出 ${creatorList.length} 个达人`);
+  }
+
+  function importCreatorLeads(importedCreators, fileName) {
+    setCreatorList((current) => mergeCreatorRecords(current, importedCreators));
     setSelectedCreatorId(importedCreators[0]?.id);
     setActiveSection("creators");
     showToast(`已导入 ${importedCreators.length} 个 EchoTik 达人：${fileName}`);
@@ -2200,12 +2332,14 @@ export function App() {
           onClearImported={clearImportedCreators}
           onContactChange={updateCreatorContact}
           onCopyHandle={copyCreatorHandle}
+          onExport={exportCreatorBackup}
           onFilterChange={updateCreatorFilter}
           onImport={() => setShowImportModal(true)}
           onSelectCreator={setSelectedCreatorId}
           onStarToggle={toggleCreatorStar}
           onStatusChange={updateCreatorCrmStatus}
           selectedCreatorId={selectedCreator?.id}
+          storeStatus={creatorStoreStatus}
         />
       );
     }
@@ -2243,6 +2377,7 @@ export function App() {
           onConfirmOutreachDraft={confirmCreatorOutreachDraft}
           onContactChange={updateCreatorContact}
           onCopyOutreachDraft={copyCreatorOutreachDraft}
+          onDraftChange={updateCreatorOutreachDraft}
           onQueueOutreachDraft={queueCreatorOutreachDraft}
           onRecordOutreachSent={recordCreatorOutreachSent}
           onStatusChange={updateCreatorCrmStatus}

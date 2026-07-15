@@ -8,6 +8,8 @@
 - [TikTok Shop / 惠程荣达 API 可行性客观分析](./research/api-feasibility-analysis.md)
 - [可复用仓库重新分析：哪些能用、怎么用](./research/reusable-repo-analysis.md)
 - [TK-SaaS 应用层实际执行计划](./specs/application-layer-execution-plan.md)
+- [店长 Windows 电脑完整操作 SOP](./specs/store-manager-windows-operations-sop.md)
+- [店长电脑达人工作台：安装、使用与验收](./specs/store-manager-creator-workbench-sop.md)
 
 ## 建议下一批文档
 

@@ -11,3 +11,4 @@ apps/automation/data/
 apps/automation/.env
 apps/automation/frpc-*.toml
 apps/automation/*.frpc.toml
+apps/web/data/

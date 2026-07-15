@@ -227,6 +227,42 @@ export function updateCreatorStatus(leads, leadId, nextStatus) {
   return leads.map((lead) => (lead.id === leadId ? { ...lead, crmStatus: nextStatus } : lead));
 }
 
+export function mergeCreatorRecords(currentLeads = [], incomingLeads = []) {
+  const incomingById = new Map(incomingLeads.map((lead) => [lead.id, lead]));
+  const existingIds = new Set(currentLeads.map((lead) => lead.id));
+  const mergedCurrent = currentLeads.map((current) => {
+    const incoming = incomingById.get(current.id);
+    if (!incoming) return current;
+
+    const existingContact = current.contact ?? {};
+    const incomingContact = incoming.contact ?? {};
+    const contactKeys = new Set([...Object.keys(incomingContact), ...Object.keys(existingContact)]);
+    const contact = Object.fromEntries(
+      [...contactKeys].map((key) => [key, existingContact[key] || incomingContact[key] || ""]),
+    );
+
+    return {
+      ...incoming,
+      starred: current.starred ?? incoming.starred,
+      crmStatus: current.crmStatus || incoming.crmStatus,
+      contact,
+      automation: current.automation ?? incoming.automation,
+      recentVideos:
+        incoming.recentVideos?.length > 0 ? incoming.recentVideos : current.recentVideos ?? [],
+      highPerformingCoverUrl:
+        incoming.highPerformingCoverUrl || current.highPerformingCoverUrl || "",
+      videoDetailsFetched:
+        Boolean(incoming.recentVideos?.length) ||
+        Boolean(incoming.videoDetailsFetched || current.videoDetailsFetched),
+    };
+  });
+
+  return [
+    ...mergedCurrent,
+    ...incomingLeads.filter((lead) => !existingIds.has(lead.id)),
+  ];
+}
+
 export function filterCreatorLeads(leads, filters = {}, now = new Date()) {
   const status = filters.status ?? "all";
   const keyword = filters.keyword ?? "all";

@@ -6,6 +6,7 @@ import {
   evaluateCreatorLead,
   getNavigationItems,
   groupTasksByShift,
+  mergeCreatorRecords,
   updateCreatorStatus,
 } from "./operations";
 import { tasks } from "./mockData";
@@ -180,5 +181,36 @@ describe("EchoTik creator CRM rules", () => {
   it("builds editable TikTok profile URLs from handles or user ids", () => {
     expect(buildTikTokProfileUrl("arihairdaily")).toBe("https://www.tiktok.com/@arihairdaily");
     expect(buildTikTokProfileUrl("@zorabraids")).toBe("https://www.tiktok.com/@zorabraids");
+  });
+
+  it("refreshes EchoTik evidence without overwriting store-manager CRM work", () => {
+    const current = {
+      ...qualifiedLead,
+      crmStatus: "contacted",
+      starred: true,
+      contact: { email: "owner@example.com", notes: "follow up Friday" },
+      automation: { outreach: { status: "sent", draft: "edited draft" } },
+      recentVideos: [],
+    };
+    const incoming = {
+      ...qualifiedLead,
+      displayName: "Fresh EchoTik Name",
+      followers: 18000,
+      crmStatus: "imported",
+      contact: { email: "api@example.com", instagram: "fresh.ig" },
+    };
+
+    const [merged] = mergeCreatorRecords([current], [incoming]);
+
+    expect(merged.displayName).toBe("Fresh EchoTik Name");
+    expect(merged.followers).toBe(18000);
+    expect(merged.crmStatus).toBe("contacted");
+    expect(merged.starred).toBe(true);
+    expect(merged.contact).toMatchObject({
+      email: "owner@example.com",
+      instagram: "fresh.ig",
+      notes: "follow up Friday",
+    });
+    expect(merged.automation.outreach.draft).toBe("edited draft");
   });
 });

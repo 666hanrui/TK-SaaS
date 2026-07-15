@@ -1,7 +1,7 @@
 # 店长 Windows 电脑完整操作 SOP
 
 日期：2026-07-10
-适用范围：TikTok Shop 订单、投诉/退款/售后、SKU 库存、惠程荣达库存与在途、评价、客服消息，以及后续达人数据。
+适用范围：TikTok Shop 订单、投诉/退款/售后、SKU 库存、惠程荣达库存与在途、评价、客服消息，以及达人数据。
 首轮模式：`shadow`，真实页面 + 多模态模型视觉，但所有外部写入均禁止。
 
 ## 0. 先明确三台电脑的职责
@@ -157,6 +157,8 @@ npm run records -- --definition tiktok.aftersales.sync
 | TikTok 商品评价 | `tiktok.reviews.sync` | `read_context` | 回复、举报 |
 | TikTok 客服 | `tiktok.messages.sync` | `read_context` | 任意消息发送 |
 | 达人与邮件 | EchoTik/公开主页/邮件只读同步 | 达人详情、公开联系方式 | 邮件或社媒建联 |
+
+达人模块现在有独立的本地工作台和持久化目录，不再只是“后续数据”。安装、一键启动、188 人种子保护、模型电脑生成草稿、人工发送和 Agent 验收步骤见 [店长电脑达人工作台 SOP](store-manager-creator-workbench-sop.md)。外联仍坚持“模型草稿 -> 人工修改 -> 人工确认 -> 人工发送 -> 回写”，不开放无人值守群发。
 
 投诉、退款与申诉都属于高风险 R3，当前环境没有任何开关可让它们提交。worker 只会采集工单、金额、截止时间、原因、物流和证据缺口。
 

@@ -1,0 +1,29 @@
+{
+  "definitionId": "echotik.creators.search",
+  "sourceTaskId": "shadow:echotik-creators:<YYYY-MM-DD>:first-wave",
+  "entityId": "creator-snapshot:echotik-us:<YYYY-MM-DD>:first-wave",
+  "requestedBy": "store-operations",
+  "target": {
+    "url": "https://echotik.live/influencers",
+    "accountId": "echotik-main",
+    "profileId": "echotik-main"
+  },
+  "input": {
+    "searchCriteria": {
+      "region": "US",
+      "minimumFollowers": 1001,
+      "keywords": [
+        "drawstring ponytail",
+        "half wig",
+        "wig",
+        "crochet hair",
+        "braids",
+        "black girl"
+      ],
+      "mustHaveRecentActivityDays": 30,
+      "mustHaveCommerceEvidence": true
+    },
+    "maxPages": 1,
+    "snapshotWindow": "<YYYY-MM-DD>"
+  }
+}

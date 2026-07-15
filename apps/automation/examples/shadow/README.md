@@ -10,4 +10,6 @@
 
 完成 `hcrd.inventory.sync`、`tiktok.inventory.sync`（和可选的 `hcrd.inventory.sync_in_transit`）后，编辑 `inventory-reconcile.json` 并运行 `npm run inventory:reconcile -- --file inventory-reconcile.json`。它只做本地确定性对账，不能打开浏览器或保存 TikTok 库存。
 
+达人只读采集使用 `echotik-creators-search.json` 和 `echotik-creator-detail.json`。先在店长电脑建立独立 `echotik-main` profile 并人工登录；搜索模板首轮固定 `maxPages: 1`，先确认筛选条件、会员限制和模型视觉证据，再逐步扩大。详情模板每次只查一个达人，必须返回最近十条视频的真实 ID、日期、播放量和商品关联；缺失就记录缺口，不能用平均值补齐。采集结果可导出/归一化后导入 `apps/web` 达人工作台。
+
 `mapping.entries` 支持两种经过确认的关系：`direct` 表示一个 HCRD SKU 对应一个 TikTok SKU ID；`bundle` 表示多个 HCRD 组件共同组成一个 TikTok SKU。组合 SKU 的 HCRD 可用量按 `min(floor(组件可用量 / 单套用量))` 计算，不能把组件库存相加。`estrella-hcrd-sku-mapping-v1.json` 保存了由订单号和物流单号交叉验证得到的首批映射及赠品组合规则。

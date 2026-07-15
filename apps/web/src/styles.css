@@ -919,6 +919,7 @@ select {
 
 .creator-command {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
@@ -926,6 +927,11 @@ select {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #ffffff;
+}
+
+.creator-command > div:first-child {
+  flex: 1 1 260px;
+  min-width: 240px;
 }
 
 .creator-command p {
@@ -947,9 +953,47 @@ select {
 
 .creator-command-actions {
   display: flex;
+  flex: 1 1 420px;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
-  flex-shrink: 0;
+}
+
+.secondary-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #31413d;
+  padding: 0 14px;
+  font-weight: 800;
+}
+
+.creator-store-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  border-radius: 999px;
+  background: #f1f5f3;
+  padding: 0 11px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.creator-store-status.saved {
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+
+.creator-store-status.warning {
+  background: var(--amber-soft);
+  color: #8a5a00;
 }
 
 .danger-action {
@@ -1707,10 +1751,18 @@ select {
   margin-bottom: 10px;
 }
 
-.outreach-draft {
-  overflow: auto;
-  max-height: 260px;
+.outreach-draft-editor {
+  display: grid;
+  gap: 7px;
   margin: 10px 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.outreach-draft-editor textarea {
+  min-height: 240px;
+  resize: vertical;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #ffffff;
@@ -1959,8 +2011,19 @@ select {
   }
 
   .creator-command .primary-action,
+  .creator-command .secondary-action,
+  .creator-command .danger-action,
   .creator-search,
   .creator-toolbar .select-control {
+    width: 100%;
+    margin-top: 12px;
+  }
+
+  .creator-command-actions {
+    justify-content: stretch;
+  }
+
+  .creator-store-status {
     width: 100%;
     margin-top: 12px;
   }
