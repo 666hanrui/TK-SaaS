@@ -51,6 +51,15 @@ npm.cmd run profile:open -- --profile echotik-main --url https://echotik.live/in
 
 店长手工登录并完成验证码。首轮任务模板为 `examples\shadow\echotik-creators-search.json` 和 `echotik-creator-detail.json`；只读采集，不发送消息。
 
+开发电脑生成正式部署 ZIP 的命令是：
+
+```bash
+cd apps/web
+npm run package:manager
+```
+
+产物位于项目根目录 `output/deploy/`，同时生成 `.sha256` 校验文件。部署 ZIP 明确排除 `.env`、账号凭据、浏览器 profile、达人正式数据和 `node_modules`；更新店长电脑时必须保留原 `apps\web\data\creator-crm` 与 `.env`。
+
 ## 4. 每天启动
 
 双击项目根目录：

@@ -9,6 +9,7 @@
     "preview": "vite preview --host 127.0.0.1",
     "start:manager": "node server.mjs",
     "creator:check": "node scripts/creator-preflight.mjs",
+    "package:manager": "npm run build && node scripts/package-store-manager.mjs",
     "test": "vitest run",
     "echotik:login": "node scripts/fetch-echotik-web.mjs --login",
     "echotik:contacts": "node scripts/fetch-echotik-contacts.mjs",
