@@ -1,0 +1,18 @@
+{
+  "definitionId": "tiktok.inventory.sync",
+  "sourceTaskId": "shadow:tiktok-inventory:<YYYY-MM-DD>:full-session-api",
+  "entityId": "tiktok-inventory:<店铺别名>:<YYYY-MM-DD>:full-session-api",
+  "requestedBy": "store-operations",
+  "target": {
+    "url": "https://<TikTok-Seller-Center>/products",
+    "accountId": "<店铺别名>",
+    "shopId": "<店铺别名>",
+    "profileId": "tiktok-shop-<店铺别名>"
+  },
+  "input": {
+    "shopId": "<店铺别名>",
+    "snapshotWindow": "full-session-api",
+    "pageSize": 50,
+    "maxPages": 100
+  }
+}

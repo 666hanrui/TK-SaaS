@@ -1,0 +1,33 @@
+{
+  "name": "tk-saas-automation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "catalog": "node src/cli/catalog.mjs",
+    "preflight": "node src/cli/preflight.mjs",
+    "model:preflight": "node src/cli/model-preflight.mjs",
+    "frp:preflight": "AUTOMATION_MODEL_PROFILE=frp_qwen_vision node src/cli/preflight.mjs",
+    "frp:model:preflight": "AUTOMATION_MODEL_PROFILE=frp_qwen_vision node src/cli/model-preflight.mjs",
+    "image:ingress": "node src/cli/image-ingress.mjs",
+    "vision:preflight": "node src/cli/vision-preflight.mjs",
+    "run": "node src/cli/run.mjs",
+    "service": "node src/service/server.mjs",
+    "worker": "node src/cli/worker.mjs",
+    "monitor": "node src/cli/remote-monitor.mjs",
+    "records": "node src/cli/remote-records.mjs",
+    "inventory:reconcile": "node src/cli/remote-inventory-reconcile.mjs",
+    "dispatch": "node src/cli/remote-dispatch.mjs",
+    "profile:open": "node src/cli/open-profile.mjs",
+    "diagnose:tiktok-inventory-api": "node src/cli/diagnose-tiktok-inventory-api.mjs",
+    "diagnose:tiktok-visual-audit": "node src/cli/diagnose-tiktok-visual-audit.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@browserbasehq/stagehand": "3.6.0",
+    "busboy": "1.6.0",
+    "openai": "6.45.0",
+    "playwright": "1.61.1",
+    "zod": "4.4.3"
+  }
+}

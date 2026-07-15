@@ -1,0 +1,61 @@
+{
+  "version": "estrella-hcrd-2026-07-13-v1",
+  "status": "evidence_backed",
+  "entries": [
+    {
+      "type": "direct",
+      "hcrdSku": "XCGLM-GLM840",
+      "tiktokSku": "1732379703949955603",
+      "evidence": [
+        {
+          "type": "order_and_tracking_join",
+          "trackingNo": "SWX349730000111823816",
+          "hcrdReferenceCode": "TKE-577471333099868265",
+          "tiktokMainOrderId": "577471333099868265"
+        }
+      ]
+    },
+    {
+      "type": "direct",
+      "hcrdSku": "XCGLM-GLM751",
+      "tiktokSku": "1732392381218525715",
+      "evidence": [
+        {
+          "type": "order_and_tracking_join",
+          "trackingNo": "SWX063930000111236030",
+          "hcrdReferenceCode": "TKE-577471192648552692",
+          "tiktokMainOrderId": "577471192648552692"
+        }
+      ]
+    },
+    {
+      "type": "direct",
+      "hcrdSku": "XCGLM-GLM794",
+      "tiktokSku": "1732348867854045715",
+      "evidence": [
+        {
+          "type": "order_and_tracking_join",
+          "trackingNo": "SWX115980000111004137",
+          "hcrdReferenceCode": "TKE-577469906487317207",
+          "tiktokMainOrderId": "577469906487317207"
+        }
+      ]
+    },
+    {
+      "type": "bundle",
+      "tiktokSku": "1732365465645322771",
+      "components": [
+        { "hcrdSku": "XCGLM-GLM801", "quantity": 1 },
+        { "hcrdSku": "XCGLM-GLM802", "quantity": 1 }
+      ],
+      "evidence": [
+        {
+          "type": "repeated_order_bundle_rule",
+          "description": "GLM801 wig cap and GLM802 glue accompany the TikTok zero-price Free Bonus SKU in TKM/TKE orders.",
+          "crossPlatformMatchedOrderCount": 3,
+          "hcrdPatternOrderCount": 11
+        }
+      ]
+    }
+  ]
+}

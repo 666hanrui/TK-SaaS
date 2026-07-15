@@ -1,0 +1,18 @@
+{
+  "definitionId": "tiktok.reviews.sync",
+  "sourceTaskId": "shadow:reviews:<YYYY-MM-DD>",
+  "entityId": "reviews:<店铺别名>:<YYYY-MM-DD>",
+  "requestedBy": "store-operations",
+  "target": {
+    "url": "https://<TikTok-Seller-Center>/reviews",
+    "accountId": "<店铺别名>",
+    "shopId": "<店铺别名>",
+    "profileId": "tiktok-shop-<店铺别名>"
+  },
+  "input": {
+    "shopId": "<店铺别名>",
+    "since": "<YYYY-MM-DD>",
+    "ratingFilter": "all",
+    "replyFilter": "all"
+  }
+}

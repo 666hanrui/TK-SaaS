@@ -1,0 +1,17 @@
+{
+  "definitionId": "tiktok.messages.sync",
+  "sourceTaskId": "shadow:messages:<YYYY-MM-DD>",
+  "entityId": "messages:<店铺别名>:<YYYY-MM-DD>",
+  "requestedBy": "store-operations",
+  "target": {
+    "url": "https://<TikTok-Seller-Center>/messages",
+    "accountId": "<店铺别名>",
+    "shopId": "<店铺别名>",
+    "profileId": "tiktok-shop-<店铺别名>"
+  },
+  "input": {
+    "shopId": "<店铺别名>",
+    "statusFilter": "pending",
+    "sinceCursor": "<YYYY-MM-DDTHH:mm:ssZ>"
+  }
+}

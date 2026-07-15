@@ -1,0 +1,30 @@
+{
+  "hcrdSnapshotId": "<hcrd.inventory.sync-run-id>",
+  "tiktokSnapshotId": "<tiktok.inventory.sync-run-id>",
+  "inTransitSnapshotId": "<hcrd.inventory.sync_in_transit-run-id-or-remove-this-field>",
+  "skuMappingVersion": "<mapping-file-version>",
+  "safetyStockVersion": "<safety-stock-file-version>",
+  "mapping": {
+    "version": "<mapping-file-version>",
+    "entries": [
+      {
+        "type": "direct",
+        "hcrdSku": "<HCRD-SKU>",
+        "tiktokSku": "<TikTok-SKU-ID>",
+        "evidence": [{ "type": "approved_order_join", "reference": "<order-or-tracking-id>" }]
+      },
+      {
+        "type": "bundle",
+        "tiktokSku": "<TikTok-BUNDLE-SKU-ID>",
+        "components": [
+          { "hcrdSku": "<HCRD-COMPONENT-SKU-1>", "quantity": 1 },
+          { "hcrdSku": "<HCRD-COMPONENT-SKU-2>", "quantity": 1 }
+        ],
+        "evidence": [{ "type": "approved_bundle_rule", "reference": "<evidence-id>" }]
+      }
+    ]
+  },
+  "safetyStock": {
+    "<TikTok-seller-SKU>": 20
+  }
+}
